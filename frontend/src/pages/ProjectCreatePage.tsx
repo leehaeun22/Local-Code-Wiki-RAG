@@ -1,27 +1,30 @@
 import { type FormEvent, useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 
+import { projectApi } from '../api/projectApi'
 import type { ProjectCreateRequest } from '../types/project'
 
 type ProjectCreateErrors = Partial<Record<keyof ProjectCreateRequest, string>>
 
 const initialForm: ProjectCreateRequest = {
-  projectName: '',
-  repositoryUrl: '',
+  name: '',
+  repository_url: '',
   branch: 'main',
-  defaultLanguage: 'ko',
-  llmMode: 'cloud',
+  description: '',
+  default_language: 'ko',
+  llm_mode: 'cloud',
 }
 
 function validateForm(form: ProjectCreateRequest) {
   const errors: ProjectCreateErrors = {}
 
-  if (!form.projectName.trim()) {
-    errors.projectName = 'Project Name is required.'
+  if (!form.name.trim()) {
+    errors.name = 'Project Name is required.'
   }
 
-  if (!form.repositoryUrl.trim()) {
-    errors.repositoryUrl = 'GitHub Repository URL is required.'
+  if (!form.repository_url.trim()) {
+    errors.repository_url = 'GitHub Repository URL is required.'
   }
 
   if (!form.branch.trim()) {
@@ -35,6 +38,12 @@ export function ProjectCreatePage() {
   const navigate = useNavigate()
   const [form, setForm] = useState<ProjectCreateRequest>(initialForm)
   const [errors, setErrors] = useState<ProjectCreateErrors>({})
+  const createProjectMutation = useMutation({
+    mutationFn: projectApi.createProject,
+    onSuccess: (project) => {
+      navigate(`/projects/${project.id}`)
+    },
+  })
 
   const updateForm = <K extends keyof ProjectCreateRequest>(
     field: K,
@@ -54,8 +63,10 @@ export function ProjectCreatePage() {
       return
     }
 
-    console.log('Project create request:', form)
-    navigate('/projects/mock-project-id')
+    createProjectMutation.mutate({
+      ...form,
+      description: form.description?.trim() || null,
+    })
   }
 
   return (
@@ -76,13 +87,13 @@ export function ProjectCreatePage() {
           <span className="text-sm font-medium text-slate-700">Project Name</span>
           <input
             className="mt-2 h-11 w-full rounded-md border border-slate-300 px-3 text-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
-            onChange={(event) => updateForm('projectName', event.target.value)}
+            onChange={(event) => updateForm('name', event.target.value)}
             placeholder="Local-Code-Wiki-RAG"
             type="text"
-            value={form.projectName}
+            value={form.name}
           />
-          {errors.projectName ? (
-            <p className="mt-2 text-sm text-red-600">{errors.projectName}</p>
+          {errors.name ? (
+            <p className="mt-2 text-sm text-red-600">{errors.name}</p>
           ) : null}
         </label>
 
@@ -90,13 +101,13 @@ export function ProjectCreatePage() {
           <span className="text-sm font-medium text-slate-700">GitHub Repository URL</span>
           <input
             className="mt-2 h-11 w-full rounded-md border border-slate-300 px-3 text-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
-            onChange={(event) => updateForm('repositoryUrl', event.target.value)}
+            onChange={(event) => updateForm('repository_url', event.target.value)}
             placeholder="https://github.com/owner/repository"
             type="url"
-            value={form.repositoryUrl}
+            value={form.repository_url}
           />
-          {errors.repositoryUrl ? (
-            <p className="mt-2 text-sm text-red-600">{errors.repositoryUrl}</p>
+          {errors.repository_url ? (
+            <p className="mt-2 text-sm text-red-600">{errors.repository_url}</p>
           ) : null}
         </label>
 
@@ -112,15 +123,25 @@ export function ProjectCreatePage() {
           {errors.branch ? <p className="mt-2 text-sm text-red-600">{errors.branch}</p> : null}
         </label>
 
+        <label className="block">
+          <span className="text-sm font-medium text-slate-700">Description</span>
+          <textarea
+            className="mt-2 min-h-24 w-full rounded-md border border-slate-300 px-3 py-3 text-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+            onChange={(event) => updateForm('description', event.target.value)}
+            placeholder="Optional onboarding context for this repository"
+            value={form.description ?? ''}
+          />
+        </label>
+
         <div className="grid gap-5 md:grid-cols-2">
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Default Language</span>
             <select
               className="mt-2 h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
               onChange={(event) =>
-                updateForm('defaultLanguage', event.target.value as ProjectCreateRequest['defaultLanguage'])
+                updateForm('default_language', event.target.value as ProjectCreateRequest['default_language'])
               }
-              value={form.defaultLanguage}
+              value={form.default_language}
             >
               <option value="ko">ko</option>
               <option value="en">en</option>
@@ -132,9 +153,9 @@ export function ProjectCreatePage() {
             <select
               className="mt-2 h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
               onChange={(event) =>
-                updateForm('llmMode', event.target.value as ProjectCreateRequest['llmMode'])
+                updateForm('llm_mode', event.target.value as ProjectCreateRequest['llm_mode'])
               }
-              value={form.llmMode}
+              value={form.llm_mode}
             >
               <option value="cloud">cloud</option>
               <option value="local">local</option>
@@ -143,11 +164,17 @@ export function ProjectCreatePage() {
         </div>
 
         <button
-          className="inline-flex h-10 items-center justify-center rounded-md bg-slate-950 px-4 text-sm font-medium text-white transition hover:bg-slate-800"
+          className="inline-flex h-10 items-center justify-center rounded-md bg-slate-950 px-4 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+          disabled={createProjectMutation.isPending}
           type="submit"
         >
-          Create project
+          {createProjectMutation.isPending ? 'Creating...' : 'Create project'}
         </button>
+        {createProjectMutation.isError ? (
+          <p className="text-sm text-red-600">
+            Failed to create project. Check that the backend API is running.
+          </p>
+        ) : null}
       </form>
     </section>
   )

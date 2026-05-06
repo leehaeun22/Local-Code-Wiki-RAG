@@ -1,29 +1,18 @@
+import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 
-import type { Project } from '../types/project'
-
-const mockProjects: Project[] = [
-  {
-    id: 'local-code-wiki-rag',
-    name: 'Local-Code-Wiki-RAG',
-    repositoryUrl: 'https://github.com/leehaeun22/Local-Code-Wiki-RAG',
-    description: 'Repository documentation and RAG chatbot for developer onboarding.',
-    status: 'Ready',
-    documentCount: 24,
-    updatedAt: '2026-05-06',
-  },
-  {
-    id: 'commerce-admin',
-    name: 'Commerce Admin',
-    repositoryUrl: 'https://github.com/example/commerce-admin',
-    description: 'Admin dashboard sample prepared for file tree and document viewer screens.',
-    status: 'Scanning',
-    documentCount: 8,
-    updatedAt: '2026-05-05',
-  },
-]
+import { projectApi } from '../api/projectApi'
 
 export function ProjectListPage() {
+  const {
+    data: projects = [],
+    isError,
+    isLoading,
+  } = useQuery({
+    queryKey: ['projects'],
+    queryFn: projectApi.getProjects,
+  })
+
   return (
     <section className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -42,8 +31,26 @@ export function ProjectListPage() {
         </Link>
       </div>
 
+      {isLoading ? (
+        <div className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
+          Loading projects...
+        </div>
+      ) : null}
+
+      {isError ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+          Failed to load projects. Check that the backend API is running.
+        </div>
+      ) : null}
+
+      {!isLoading && !isError && projects.length === 0 ? (
+        <div className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
+          No projects yet. Create a project to connect a GitHub repository.
+        </div>
+      ) : null}
+
       <div className="grid gap-4 lg:grid-cols-2">
-        {mockProjects.map((project) => (
+        {projects.map((project) => (
           <Link
             key={project.id}
             to={`/projects/${project.id}`}
@@ -52,16 +59,18 @@ export function ProjectListPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-slate-950">{project.name}</h2>
-                <p className="mt-1 break-all text-sm text-slate-500">{project.repositoryUrl}</p>
+                <p className="mt-1 break-all text-sm text-slate-500">{project.repository_url}</p>
               </div>
               <span className="shrink-0 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-                {project.status}
+                {project.settings?.llm_mode ?? 'cloud'}
               </span>
             </div>
-            <p className="mt-4 text-sm leading-6 text-slate-600">{project.description}</p>
+            <p className="mt-4 text-sm leading-6 text-slate-600">
+              {project.description || 'No description provided.'}
+            </p>
             <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 text-sm text-slate-500">
-              <span>{project.documentCount} docs</span>
-              <span>Updated {project.updatedAt}</span>
+              <span>Branch {project.branch}</span>
+              <span>Updated {new Date(project.updated_at).toLocaleDateString()}</span>
             </div>
           </Link>
         ))}
