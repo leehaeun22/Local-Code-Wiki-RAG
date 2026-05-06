@@ -5,6 +5,10 @@ class Settings(BaseSettings):
     app_name: str = "Local Code Wiki RAG API"
     environment: str = "development"
     database_url: str = "postgresql://repowiki:repowiki@localhost:5432/repowiki"
+    openai_api_key: str | None = None
+    openai_embedding_model: str = "text-embedding-3-small"
+    chroma_host: str = "localhost"
+    chroma_port: int = 8001
     cors_origins: list[str] = [
         "http://localhost:3000",
         "http://localhost:5173",

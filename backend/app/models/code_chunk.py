@@ -19,6 +19,7 @@ class CodeChunk(UUIDTimestampMixin, Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     embedding_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    vector_collection_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     file: Mapped["RepositoryFile"] = relationship(back_populates="code_chunks")
     message_references: Mapped[list["MessageReference"]] = relationship(back_populates="chunk")

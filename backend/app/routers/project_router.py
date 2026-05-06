@@ -4,6 +4,11 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.code_chunk_schema import CodeChunkGenerationResult, CodeChunkRead
+from app.schemas.embedding_schema import (
+    EmbeddingGenerationResult,
+    VectorSearchRequest,
+    VectorSearchResult,
+)
 from app.schemas.project_schema import (
     ApiResponse,
     DeleteProjectResult,
@@ -22,6 +27,11 @@ from app.services.code_chunk_service import (
     CodeChunkGenerationError,
     generate_code_chunks,
     list_code_chunks,
+)
+from app.services.embedding_service import (
+    EmbeddingGenerationError,
+    generate_embeddings,
+    search_project_chunks,
 )
 from app.services.repository_file_scan_service import (
     RepositoryScanError,
@@ -227,6 +237,69 @@ def get_project_code_chunks(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found.",
+        ) from exc
+
+
+@router.post(
+    "/{project_id}/embeddings/generate",
+    response_model=ApiResponse[EmbeddingGenerationResult],
+)
+def generate_project_embeddings(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> ApiResponse[EmbeddingGenerationResult]:
+    try:
+        embedded_count, collection_name, task = generate_embeddings(db, project_id)
+        return ApiResponse(
+            data=EmbeddingGenerationResult(
+                project_id=project_id,
+                embedded_chunk_count=embedded_count,
+                vector_collection_name=collection_name,
+                task_id=task.id,
+            ),
+        )
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        ) from exc
+    except EmbeddingGenerationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save embedding result.",
+        ) from exc
+
+
+@router.post("/{project_id}/search", response_model=ApiResponse[list[VectorSearchResult]])
+def search_project(
+    project_id: str,
+    payload: VectorSearchRequest,
+    db: Session = Depends(get_db),
+) -> ApiResponse[list[VectorSearchResult]]:
+    try:
+        return ApiResponse(
+            data=search_project_chunks(
+                db=db,
+                project_id=project_id,
+                query=payload.query,
+                top_k=payload.top_k,
+            ),
+        )
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        ) from exc
+    except EmbeddingGenerationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
 
