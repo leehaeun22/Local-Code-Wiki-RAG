@@ -3,13 +3,28 @@ import { Link, useParams } from 'react-router-dom'
 const projectSummary = {
   name: 'Local-Code-Wiki-RAG',
   repositoryUrl: 'https://github.com/leehaeun22/Local-Code-Wiki-RAG',
-  status: 'Ready for documentation',
-  metrics: [
-    { label: 'Scanned files', value: '142' },
-    { label: 'Generated docs', value: '24' },
-    { label: 'Code chunks', value: '386' },
-  ],
+  status: 'Ready',
 }
+
+const mockFiles = [
+  'frontend/src/app/App.tsx',
+  'frontend/src/pages/ProjectListPage.tsx',
+  'frontend/src/pages/ProjectDetailPage.tsx',
+  'frontend/src/components/layout/AppLayout.tsx',
+  'backend/app/main.py',
+  'docs/architecture.md',
+]
+
+const mockMessages = [
+  {
+    role: 'Assistant',
+    text: 'This project is structured as a monorepo with separate frontend and backend workspaces.',
+  },
+  {
+    role: 'Developer',
+    text: 'Where should I start reading?',
+  },
+]
 
 export function ProjectDetailPage() {
   const { projectId } = useParams()
@@ -30,36 +45,99 @@ export function ProjectDetailPage() {
         </Link>
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-1 border-b border-slate-100 pb-5">
-          <span className="text-sm text-slate-500">Project ID</span>
-          <strong className="text-base text-slate-950">{projectId}</strong>
-        </div>
-        <div className="mt-5 grid gap-4 md:grid-cols-3">
-          {projectSummary.metrics.map((metric) => (
-            <div key={metric.label} className="rounded-md bg-slate-50 p-4">
-              <p className="text-sm text-slate-500">{metric.label}</p>
-              <p className="mt-2 text-2xl font-semibold text-slate-950">{metric.value}</p>
-            </div>
-          ))}
-        </div>
-      </div>
+      <div className="grid min-h-[640px] gap-4 xl:grid-cols-[280px_minmax(0,1fr)_340px]">
+        <aside className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 p-4">
+            <p className="text-sm font-semibold text-slate-950">File Tree</p>
+            <p className="mt-1 text-xs text-slate-500">{mockFiles.length} mock files</p>
+          </div>
+          <div className="space-y-1 p-3">
+            {mockFiles.map((file, index) => (
+              <button
+                key={file}
+                className={[
+                  'block w-full truncate rounded-md px-3 py-2 text-left text-sm transition',
+                  index === 1
+                    ? 'bg-sky-50 font-medium text-sky-800'
+                    : 'text-slate-600 hover:bg-slate-50',
+                ].join(' ')}
+                type="button"
+              >
+                {file}
+              </button>
+            ))}
+          </div>
+        </aside>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-950">Documentation queue</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
-            File tree, document viewer, and generated wiki pages will be connected in the next
-            frontend screens.
-          </p>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-950">Chat readiness</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
-            RAG search and chatbot answers are not connected yet. This area is reserved for the
-            onboarding assistant UI.
-          </p>
-        </div>
+        <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-950">Document Viewer</p>
+                <p className="mt-1 text-xs text-slate-500">Project ID: {projectId}</p>
+              </div>
+              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+                {projectSummary.status}
+              </span>
+            </div>
+          </div>
+          <div className="space-y-5 p-6">
+            <div>
+              <h2 className="text-2xl font-semibold text-slate-950">ProjectListPage.tsx</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                This mock document explains how the project list page presents registered
+                repositories, scan state, generated document counts, and navigation into the
+                repository workspace.
+              </p>
+            </div>
+            <div className="rounded-lg bg-slate-950 p-4 font-mono text-sm leading-6 text-slate-100">
+              <p>frontend/src/pages/ProjectListPage.tsx</p>
+              <p className="text-slate-400">Mock summary generated from repository analysis.</p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              {['Files scanned', 'Documents', 'Chunks'].map((label, index) => (
+                <div key={label} className="rounded-md border border-slate-200 p-4">
+                  <p className="text-xs font-medium text-slate-500">{label}</p>
+                  <p className="mt-2 text-xl font-semibold text-slate-950">
+                    {['142', '24', '386'][index]}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </article>
+
+        <aside className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 p-4">
+            <p className="text-sm font-semibold text-slate-950">Chat Panel</p>
+            <p className="mt-1 text-xs text-slate-500">Mock RAG conversation</p>
+          </div>
+          <div className="flex h-[calc(100%-73px)] min-h-[520px] flex-col">
+            <div className="flex-1 space-y-3 overflow-auto p-4">
+              {mockMessages.map((message) => (
+                <div key={`${message.role}-${message.text}`} className="rounded-lg bg-slate-50 p-3">
+                  <p className="text-xs font-semibold text-slate-500">{message.role}</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-700">{message.text}</p>
+                </div>
+              ))}
+            </div>
+            <div className="border-t border-slate-100 p-4">
+              <div className="flex gap-2">
+                <input
+                  className="h-10 min-w-0 flex-1 rounded-md border border-slate-300 px-3 text-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                  placeholder="Ask about this repository"
+                  type="text"
+                />
+                <button
+                  className="h-10 rounded-md bg-slate-950 px-4 text-sm font-medium text-white transition hover:bg-slate-800"
+                  type="button"
+                >
+                  Send
+                </button>
+              </div>
+            </div>
+          </div>
+        </aside>
       </div>
     </section>
   )

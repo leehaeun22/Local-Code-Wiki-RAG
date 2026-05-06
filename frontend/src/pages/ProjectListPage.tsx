@@ -29,10 +29,9 @@ export function ProjectListPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-sm font-medium text-sky-700">Projects</p>
-          <h1 className="mt-2 text-3xl font-semibold text-slate-950">Repository workspace</h1>
+          <h1 className="mt-2 text-3xl font-semibold text-slate-950">Repository wiki projects</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            Registered repositories will appear here with scan progress, generated documents, and
-            onboarding chat access.
+            Track repository scans, generated wiki pages, and chat readiness from one workspace.
           </p>
         </div>
         <Link
@@ -48,14 +47,14 @@ export function ProjectListPage() {
           <Link
             key={project.id}
             to={`/projects/${project.id}`}
-            className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition hover:border-sky-300 hover:shadow-md"
+            className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md"
           >
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-slate-950">{project.name}</h2>
                 <p className="mt-1 break-all text-sm text-slate-500">{project.repositoryUrl}</p>
               </div>
-              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+              <span className="shrink-0 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
                 {project.status}
               </span>
             </div>
