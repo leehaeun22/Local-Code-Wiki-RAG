@@ -3,6 +3,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.schemas.code_chunk_schema import CodeChunkGenerationResult, CodeChunkRead
 from app.schemas.project_schema import (
     ApiResponse,
     DeleteProjectResult,
@@ -17,6 +18,11 @@ from app.schemas.repository_file_schema import (
     RepositoryScanResult,
 )
 from app.services import project_service
+from app.services.code_chunk_service import (
+    CodeChunkGenerationError,
+    generate_code_chunks,
+    list_code_chunks,
+)
 from app.services.repository_file_scan_service import (
     RepositoryScanError,
     build_file_tree,
@@ -104,6 +110,17 @@ def clone_project_repository(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found.",
         ) from exc
+    except RepositoryCloneError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to clone repository.",
+        ) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save clone result.",
+        ) from exc
 
 
 @router.post("/{project_id}/scan", response_model=ApiResponse[RepositoryScanResult])
@@ -165,16 +182,51 @@ def get_project_file_tree(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found.",
         ) from exc
-    except RepositoryCloneError as exc:
+
+
+@router.post("/{project_id}/chunks/generate", response_model=ApiResponse[CodeChunkGenerationResult])
+def generate_project_code_chunks(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> ApiResponse[CodeChunkGenerationResult]:
+    try:
+        chunks, task = generate_code_chunks(db, project_id)
+        return ApiResponse(
+            data=CodeChunkGenerationResult(
+                project_id=project_id,
+                generated_chunk_count=len(chunks),
+                task_id=task.id,
+            ),
+        )
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        ) from exc
+    except CodeChunkGenerationError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to clone repository.",
+            detail=str(exc),
         ) from exc
     except SQLAlchemyError as exc:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to save clone result.",
+            detail="Failed to save code chunks.",
+        ) from exc
+
+
+@router.get("/{project_id}/chunks", response_model=ApiResponse[list[CodeChunkRead]])
+def get_project_code_chunks(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> ApiResponse[list[CodeChunkRead]]:
+    try:
+        return ApiResponse(data=list_code_chunks(db, project_id))
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
         ) from exc
 
 

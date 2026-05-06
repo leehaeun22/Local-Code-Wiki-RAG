@@ -13,9 +13,11 @@ class CodeChunk(UUIDTimestampMixin, Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
     file_id: Mapped[str] = mapped_column(ForeignKey("repository_files.id"), nullable=False)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    chunk_type: Mapped[str] = mapped_column(String(50), default="line", nullable=False)
     start_line: Mapped[int] = mapped_column(Integer, nullable=False)
     end_line: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     embedding_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     file: Mapped["RepositoryFile"] = relationship(back_populates="code_chunks")
