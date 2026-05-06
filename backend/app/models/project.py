@@ -15,6 +15,8 @@ class Project(UUIDTimestampMixin, Base):
     repository_url: Mapped[str] = mapped_column(String(500), nullable=False)
     default_branch: Mapped[str] = mapped_column(String(100), default="main", nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    local_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    last_commit_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     owner: Mapped["User"] = relationship(back_populates="projects")
     settings: Mapped["ProjectSetting"] = relationship(back_populates="project", uselist=False)

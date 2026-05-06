@@ -7,10 +7,12 @@ from app.schemas.project_schema import (
     ApiResponse,
     DeleteProjectResult,
     ProjectCreate,
+    ProjectCloneResult,
     ProjectRead,
     ProjectUpdate,
 )
 from app.services import project_service
+from app.services.repository_clone_service import RepositoryCloneError, clone_repository
 from app.services.project_service import ProjectNotFoundError
 
 
@@ -25,6 +27,8 @@ def _to_project_read(project) -> ProjectRead:
         repository_url=project.repository_url,
         branch=project.default_branch,
         description=project.description,
+        local_path=project.local_path,
+        last_commit_hash=project.last_commit_hash,
         settings=project.settings,
         created_at=project.created_at,
         updated_at=project.updated_at,
@@ -66,6 +70,39 @@ def get_project(project_id: str, db: Session = Depends(get_db)) -> ApiResponse[P
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found.",
+        ) from exc
+
+
+@router.post("/{project_id}/clone", response_model=ApiResponse[ProjectCloneResult])
+def clone_project_repository(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> ApiResponse[ProjectCloneResult]:
+    try:
+        project, task, commit = clone_repository(db, project_id)
+        return ApiResponse(
+            data=ProjectCloneResult(
+                project_id=project.id,
+                local_path=project.local_path or "",
+                commit_hash=commit.commit_hash,
+                task_id=task.id,
+            ),
+        )
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        ) from exc
+    except RepositoryCloneError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to clone repository.",
+        ) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save clone result.",
         ) from exc
 
 

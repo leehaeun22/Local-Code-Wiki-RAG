@@ -51,6 +51,8 @@ class ProjectRead(BaseModel):
     repository_url: str
     branch: str
     description: str | None
+    local_path: str | None
+    last_commit_hash: str | None
     settings: ProjectSettingRead | None
     created_at: datetime
     updated_at: datetime
@@ -60,3 +62,10 @@ class ProjectRead(BaseModel):
 
 class DeleteProjectResult(BaseModel):
     id: str
+
+
+class ProjectCloneResult(BaseModel):
+    project_id: str
+    local_path: str
+    commit_hash: str
+    task_id: str
