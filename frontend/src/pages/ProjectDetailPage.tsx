@@ -12,6 +12,14 @@ const projectSummary = {
 export function ProjectDetailPage() {
   const { projectId } = useParams()
 
+  if (!projectId) {
+    return (
+      <section className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+        Project ID is missing.
+      </section>
+    )
+  }
+
   return (
     <section className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -29,7 +37,7 @@ export function ProjectDetailPage() {
       </div>
 
       <div className="grid min-h-[640px] gap-4 xl:grid-cols-[280px_minmax(0,1fr)_340px]">
-        <FileTree />
+        <FileTree projectId={projectId} />
 
         <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 p-5">

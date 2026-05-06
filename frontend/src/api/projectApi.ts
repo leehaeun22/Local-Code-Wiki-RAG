@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import type { FileTreeNode, RepositoryScanResult } from '../types/file'
 import type {
   ApiResponse,
   Project,
@@ -33,6 +34,20 @@ export const projectApi = {
   async deleteProject(projectId: string) {
     const { data } = await apiClient.delete<ApiResponse<{ id: string }>>(
       `/api/v1/projects/${projectId}`,
+    )
+    return data.data
+  },
+
+  async scanProject(projectId: string) {
+    const { data } = await apiClient.post<ApiResponse<RepositoryScanResult>>(
+      `/api/v1/projects/${projectId}/scan`,
+    )
+    return data.data
+  },
+
+  async getFileTree(projectId: string) {
+    const { data } = await apiClient.get<ApiResponse<FileTreeNode[]>>(
+      `/api/v1/projects/${projectId}/file-tree`,
     )
     return data.data
   },

@@ -1,135 +1,8 @@
 import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
+import { projectApi } from '../../api/projectApi'
 import type { FileTreeNode as FileTreeNodeType } from '../../types/file'
-
-const mockFileTree: FileTreeNodeType[] = [
-  {
-    id: 'frontend',
-    name: 'frontend',
-    path: 'frontend',
-    type: 'directory',
-    children: [
-      {
-        id: 'frontend-src',
-        name: 'src',
-        path: 'frontend/src',
-        type: 'directory',
-        children: [
-          {
-            id: 'frontend-src-app',
-            name: 'app',
-            path: 'frontend/src/app',
-            type: 'directory',
-            children: [
-              {
-                id: 'frontend-src-app-app',
-                name: 'App.tsx',
-                path: 'frontend/src/app/App.tsx',
-                type: 'file',
-              },
-              {
-                id: 'frontend-src-app-router',
-                name: 'router.tsx',
-                path: 'frontend/src/app/router.tsx',
-                type: 'file',
-              },
-            ],
-          },
-          {
-            id: 'frontend-src-pages',
-            name: 'pages',
-            path: 'frontend/src/pages',
-            type: 'directory',
-            children: [
-              {
-                id: 'frontend-src-pages-list',
-                name: 'ProjectListPage.tsx',
-                path: 'frontend/src/pages/ProjectListPage.tsx',
-                type: 'file',
-              },
-              {
-                id: 'frontend-src-pages-detail',
-                name: 'ProjectDetailPage.tsx',
-                path: 'frontend/src/pages/ProjectDetailPage.tsx',
-                type: 'file',
-              },
-            ],
-          },
-          {
-            id: 'frontend-src-components',
-            name: 'components',
-            path: 'frontend/src/components',
-            type: 'directory',
-            children: [
-              {
-                id: 'frontend-src-components-layout',
-                name: 'layout',
-                path: 'frontend/src/components/layout',
-                type: 'directory',
-                children: [
-                  {
-                    id: 'frontend-src-components-layout-app',
-                    name: 'AppLayout.tsx',
-                    path: 'frontend/src/components/layout/AppLayout.tsx',
-                    type: 'file',
-                  },
-                  {
-                    id: 'frontend-src-components-layout-sidebar',
-                    name: 'Sidebar.tsx',
-                    path: 'frontend/src/components/layout/Sidebar.tsx',
-                    type: 'file',
-                  },
-                ],
-              },
-            ],
-          },
-        ],
-      },
-      {
-        id: 'frontend-package',
-        name: 'package.json',
-        path: 'frontend/package.json',
-        type: 'file',
-      },
-    ],
-  },
-  {
-    id: 'backend',
-    name: 'backend',
-    path: 'backend',
-    type: 'directory',
-    children: [
-      {
-        id: 'backend-app',
-        name: 'app',
-        path: 'backend/app',
-        type: 'directory',
-        children: [
-          {
-            id: 'backend-app-main',
-            name: 'main.py',
-            path: 'backend/app/main.py',
-            type: 'file',
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'docs',
-    name: 'docs',
-    path: 'docs',
-    type: 'directory',
-    children: [
-      {
-        id: 'docs-architecture',
-        name: 'architecture.md',
-        path: 'docs/architecture.md',
-        type: 'file',
-      },
-    ],
-  },
-]
 
 function FileTreeItem({
   node,
@@ -143,16 +16,16 @@ function FileTreeItem({
   depth: number
   expandedIds: Set<string>
   selectedPath: string
-  onToggle: (nodeId: string) => void
+  onToggle: (nodePath: string) => void
   onSelectFile: (path: string) => void
 }) {
   const isDirectory = node.type === 'directory'
-  const isExpanded = expandedIds.has(node.id)
+  const isExpanded = expandedIds.has(node.path)
   const isSelected = selectedPath === node.path
 
   const handleClick = () => {
     if (isDirectory) {
-      onToggle(node.id)
+      onToggle(node.path)
       return
     }
 
@@ -178,11 +51,11 @@ function FileTreeItem({
         <span className="truncate">{node.name}</span>
       </button>
 
-      {isDirectory && isExpanded && node.children ? (
+      {isDirectory && isExpanded ? (
         <div>
           {node.children.map((child) => (
             <FileTreeItem
-              key={child.id}
+              key={child.path}
               depth={depth + 1}
               expandedIds={expandedIds}
               node={child}
@@ -197,20 +70,39 @@ function FileTreeItem({
   )
 }
 
-export function FileTree() {
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(
-    () => new Set(['frontend', 'frontend-src', 'frontend-src-pages']),
-  )
-  const [selectedPath, setSelectedPath] = useState('frontend/src/pages/ProjectListPage.tsx')
+interface FileTreeProps {
+  projectId: string
+}
 
-  const toggleDirectory = (nodeId: string) => {
+export function FileTree({ projectId }: FileTreeProps) {
+  const queryClient = useQueryClient()
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
+  const [selectedPath, setSelectedPath] = useState('')
+
+  const {
+    data: fileTree = [],
+    isError,
+    isLoading,
+  } = useQuery({
+    queryKey: ['project-file-tree', projectId],
+    queryFn: () => projectApi.getFileTree(projectId),
+  })
+
+  const scanMutation = useMutation({
+    mutationFn: () => projectApi.scanProject(projectId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['project-file-tree', projectId] })
+    },
+  })
+
+  const toggleDirectory = (nodePath: string) => {
     setExpandedIds((current) => {
       const next = new Set(current)
 
-      if (next.has(nodeId)) {
-        next.delete(nodeId)
+      if (next.has(nodePath)) {
+        next.delete(nodePath)
       } else {
-        next.add(nodeId)
+        next.add(nodePath)
       }
 
       return next
@@ -220,13 +112,42 @@ export function FileTree() {
   return (
     <aside className="rounded-lg border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 p-4">
-        <p className="text-sm font-semibold text-slate-950">File Tree</p>
-        <p className="mt-1 text-xs text-slate-500">Mock repository structure</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-slate-950">File Tree</p>
+            <p className="mt-1 text-xs text-slate-500">Repository scan result</p>
+          </div>
+          <button
+            className="h-8 rounded-md bg-slate-950 px-3 text-xs font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+            disabled={scanMutation.isPending}
+            onClick={() => scanMutation.mutate()}
+            type="button"
+          >
+            {scanMutation.isPending ? 'Scanning...' : 'Scan'}
+          </button>
+        </div>
+        {scanMutation.isError ? (
+          <p className="mt-3 text-xs leading-5 text-red-600">
+            Scan failed. Clone the repository first and check the backend logs.
+          </p>
+        ) : null}
       </div>
+
       <div className="space-y-1 p-3">
-        {mockFileTree.map((node) => (
+        {isLoading ? <p className="px-2 py-3 text-sm text-slate-500">Loading file tree...</p> : null}
+        {isError ? (
+          <p className="px-2 py-3 text-sm leading-6 text-red-600">
+            Failed to load file tree. Check that the backend API is running.
+          </p>
+        ) : null}
+        {!isLoading && !isError && fileTree.length === 0 ? (
+          <p className="px-2 py-3 text-sm leading-6 text-slate-500">
+            No files scanned yet. Run scan after cloning the repository.
+          </p>
+        ) : null}
+        {fileTree.map((node) => (
           <FileTreeItem
-            key={node.id}
+            key={node.path}
             depth={0}
             expandedIds={expandedIds}
             node={node}
@@ -236,9 +157,12 @@ export function FileTree() {
           />
         ))}
       </div>
+
       <div className="border-t border-slate-100 p-4">
         <p className="text-xs font-medium text-slate-500">Selected file</p>
-        <p className="mt-1 break-all text-sm font-medium text-slate-800">{selectedPath}</p>
+        <p className="mt-1 break-all text-sm font-medium text-slate-800">
+          {selectedPath || 'Select a file from the tree.'}
+        </p>
       </div>
     </aside>
   )
