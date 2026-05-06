@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "Local Code Wiki RAG API"
     environment: str = "development"
-    database_url: str = "postgresql://postgres:postgres@localhost:5432/local_code_wiki_rag"
+    database_url: str = "postgresql://repowiki:repowiki@localhost:5432/repowiki"
     cors_origins: list[str] = [
         "http://localhost:3000",
         "http://localhost:5173",
