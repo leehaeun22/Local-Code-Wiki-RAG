@@ -4,6 +4,11 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.code_chunk_schema import CodeChunkGenerationResult, CodeChunkRead
+from app.schemas.document_schema import (
+    DocumentGenerateRequest,
+    DocumentGenerationResult,
+    DocumentRead,
+)
 from app.schemas.embedding_schema import (
     EmbeddingGenerationResult,
     VectorSearchRequest,
@@ -27,6 +32,12 @@ from app.services.code_chunk_service import (
     CodeChunkGenerationError,
     generate_code_chunks,
     list_code_chunks,
+)
+from app.services.document_generation_service import (
+    DocumentGenerationError,
+    generate_documents,
+    get_document,
+    list_documents,
 )
 from app.services.embedding_service import (
     EmbeddingGenerationError,
@@ -299,6 +310,77 @@ def search_project(
     except EmbeddingGenerationError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(
+    "/{project_id}/documents/generate",
+    response_model=ApiResponse[DocumentGenerationResult],
+)
+def generate_project_documents(
+    project_id: str,
+    payload: DocumentGenerateRequest,
+    db: Session = Depends(get_db),
+) -> ApiResponse[DocumentGenerationResult]:
+    try:
+        documents = generate_documents(db, project_id, payload)
+        return ApiResponse(
+            data=DocumentGenerationResult(
+                project_id=project_id,
+                generated_document_count=len(documents),
+                documents=documents,
+            ),
+        )
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        ) from exc
+    except DocumentGenerationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save generated documents.",
+        ) from exc
+
+
+@router.get("/{project_id}/documents", response_model=ApiResponse[list[DocumentRead]])
+def get_project_documents(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> ApiResponse[list[DocumentRead]]:
+    try:
+        return ApiResponse(data=list_documents(db, project_id))
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        ) from exc
+
+
+@router.get("/{project_id}/documents/{document_id}", response_model=ApiResponse[DocumentRead])
+def get_project_document(
+    project_id: str,
+    document_id: str,
+    db: Session = Depends(get_db),
+) -> ApiResponse[DocumentRead]:
+    try:
+        return ApiResponse(data=get_document(db, project_id, document_id))
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        ) from exc
+    except DocumentGenerationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
 
