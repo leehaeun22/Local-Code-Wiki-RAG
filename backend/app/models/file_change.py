@@ -10,7 +10,7 @@ from app.models.mixins import UUIDTimestampMixin
 class FileChange(UUIDTimestampMixin, Base):
     __tablename__ = "file_changes"
 
-    file_id: Mapped[str] = mapped_column(ForeignKey("repository_files.id"), nullable=False)
+    file_id: Mapped[str | None] = mapped_column(ForeignKey("repository_files.id"), nullable=True)
     commit_id: Mapped[str | None] = mapped_column(ForeignKey("commits.id"), nullable=True)
     change_type: Mapped[str] = mapped_column(String(50), nullable=False)
     file_path: Mapped[str] = mapped_column(String(1000), nullable=False)

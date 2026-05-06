@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     openai_chat_model: str = "gpt-4o-mini"
     chroma_host: str = "localhost"
     chroma_port: int = 8001
+    github_webhook_secret: str | None = None
     cors_origins: list[str] = [
         "http://localhost:3000",
         "http://localhost:5173",
