@@ -70,3 +70,23 @@ This project aims to reduce onboarding time by turning repository source code in
 ## Getting Started
 
 TODO
+
+## Docker Compose
+
+Start local infrastructure services:
+
+```bash
+docker compose up -d
+```
+
+Services:
+
+- PostgreSQL: `localhost:5432`
+- Redis: `localhost:6379`
+- ChromaDB: `localhost:8001`
+
+Copy the environment example before running backend services:
+
+```bash
+cp .env.example backend/.env
+```
