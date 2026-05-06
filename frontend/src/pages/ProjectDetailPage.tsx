@@ -1,19 +1,12 @@
 import { Link, useParams } from 'react-router-dom'
 
+import { FileTree } from '../components/file/FileTree'
+
 const projectSummary = {
   name: 'Local-Code-Wiki-RAG',
   repositoryUrl: 'https://github.com/leehaeun22/Local-Code-Wiki-RAG',
   status: 'Ready',
 }
-
-const mockFiles = [
-  'frontend/src/app/App.tsx',
-  'frontend/src/pages/ProjectListPage.tsx',
-  'frontend/src/pages/ProjectDetailPage.tsx',
-  'frontend/src/components/layout/AppLayout.tsx',
-  'backend/app/main.py',
-  'docs/architecture.md',
-]
 
 const mockMessages = [
   {
@@ -46,28 +39,7 @@ export function ProjectDetailPage() {
       </div>
 
       <div className="grid min-h-[640px] gap-4 xl:grid-cols-[280px_minmax(0,1fr)_340px]">
-        <aside className="rounded-lg border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 p-4">
-            <p className="text-sm font-semibold text-slate-950">File Tree</p>
-            <p className="mt-1 text-xs text-slate-500">{mockFiles.length} mock files</p>
-          </div>
-          <div className="space-y-1 p-3">
-            {mockFiles.map((file, index) => (
-              <button
-                key={file}
-                className={[
-                  'block w-full truncate rounded-md px-3 py-2 text-left text-sm transition',
-                  index === 1
-                    ? 'bg-sky-50 font-medium text-sky-800'
-                    : 'text-slate-600 hover:bg-slate-50',
-                ].join(' ')}
-                type="button"
-              >
-                {file}
-              </button>
-            ))}
-          </div>
-        </aside>
+        <FileTree />
 
         <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 p-5">
