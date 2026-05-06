@@ -1,5 +1,6 @@
 import { Link, useParams } from 'react-router-dom'
 
+import { ChatPanel } from '../components/chat/ChatPanel'
 import { FileTree } from '../components/file/FileTree'
 
 const projectSummary = {
@@ -7,17 +8,6 @@ const projectSummary = {
   repositoryUrl: 'https://github.com/leehaeun22/Local-Code-Wiki-RAG',
   status: 'Ready',
 }
-
-const mockMessages = [
-  {
-    role: 'Assistant',
-    text: 'This project is structured as a monorepo with separate frontend and backend workspaces.',
-  },
-  {
-    role: 'Developer',
-    text: 'Where should I start reading?',
-  },
-]
 
 export function ProjectDetailPage() {
   const { projectId } = useParams()
@@ -79,37 +69,7 @@ export function ProjectDetailPage() {
           </div>
         </article>
 
-        <aside className="rounded-lg border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 p-4">
-            <p className="text-sm font-semibold text-slate-950">Chat Panel</p>
-            <p className="mt-1 text-xs text-slate-500">Mock RAG conversation</p>
-          </div>
-          <div className="flex h-[calc(100%-73px)] min-h-[520px] flex-col">
-            <div className="flex-1 space-y-3 overflow-auto p-4">
-              {mockMessages.map((message) => (
-                <div key={`${message.role}-${message.text}`} className="rounded-lg bg-slate-50 p-3">
-                  <p className="text-xs font-semibold text-slate-500">{message.role}</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-700">{message.text}</p>
-                </div>
-              ))}
-            </div>
-            <div className="border-t border-slate-100 p-4">
-              <div className="flex gap-2">
-                <input
-                  className="h-10 min-w-0 flex-1 rounded-md border border-slate-300 px-3 text-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
-                  placeholder="Ask about this repository"
-                  type="text"
-                />
-                <button
-                  className="h-10 rounded-md bg-slate-950 px-4 text-sm font-medium text-white transition hover:bg-slate-800"
-                  type="button"
-                >
-                  Send
-                </button>
-              </div>
-            </div>
-          </div>
-        </aside>
+        <ChatPanel />
       </div>
     </section>
   )
