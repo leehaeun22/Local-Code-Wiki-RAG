@@ -1,60 +1,72 @@
 import { useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
 
-import type { AnswerLanguage, ChatMessage as ChatMessageType, ChatReference } from '../../types/chat'
+import { projectApi } from '../../api/projectApi'
+import type { AnswerLanguage, ChatMessage as ChatMessageType, ChatSession } from '../../types/chat'
 import { ChatInput } from './ChatInput'
 import { ChatMessage } from './ChatMessage'
-
-const mockReferences: ChatReference[] = [
-  {
-    file_path: 'frontend/src/pages/ProjectDetailPage.tsx',
-    start_line: 32,
-    end_line: 96,
-    summary: 'Defines the project detail workspace that combines file tree, document viewer, and chat panel.',
-  },
-  {
-    file_path: 'frontend/src/components/file/FileTree.tsx',
-    start_line: 135,
-    end_line: 186,
-    summary: 'Manages expanded folders and selected file path for the mock repository tree.',
-  },
-]
 
 const initialMessages: ChatMessageType[] = [
   {
     id: 'assistant-welcome',
     role: 'assistant',
-    content:
-      'Ask questions about the repository structure, onboarding flow, or generated documentation.',
-    references: mockReferences.slice(0, 1),
+    content: 'Ask questions about this repository. Answers will use generated RAG context.',
+    references: [],
   },
 ]
 
-function createMockAnswer(question: string, language: AnswerLanguage): ChatMessageType {
-  const content =
-    language === 'ko'
-      ? `"${question}"에 대한 mock RAG 답변입니다.\n현재 화면은 선택된 코드 문서와 파일 트리 맥락을 참고해 온보딩 질문에 답변하도록 설계되어 있습니다.`
-      : `Mock RAG answer for "${question}".\nThis panel is designed to answer onboarding questions using the selected code document and file tree context.`
-
-  return {
-    id: `assistant-${Date.now()}`,
-    role: 'assistant',
-    content,
-    references: mockReferences,
-  }
+interface ChatPanelProps {
+  projectId: string
 }
 
-export function ChatPanel() {
+export function ChatPanel({ projectId }: ChatPanelProps) {
   const [language, setLanguage] = useState<AnswerLanguage>('ko')
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages)
+  const [session, setSession] = useState<ChatSession | null>(null)
+  const [errorMessage, setErrorMessage] = useState('')
+
+  const chatMutation = useMutation({
+    mutationFn: async (question: string) => {
+      const nextSession =
+        session ??
+        (await projectApi.createChatSession(projectId, {
+          title: question.slice(0, 80) || 'New chat',
+        }))
+
+      if (!session) {
+        setSession(nextSession)
+      }
+
+      return projectApi.sendChatMessage(projectId, {
+        question,
+        session_id: nextSession.id,
+        language,
+        top_k: 5,
+      })
+    },
+    onError: () => {
+      setErrorMessage(
+        'Failed to get an answer. Check that embeddings are generated and the backend API is running.',
+      )
+    },
+    onSuccess: (response) => {
+      setSession(response.session)
+      setMessages((current) => [...current, response.assistant_message])
+      setErrorMessage('')
+    },
+  })
 
   const handleQuestionSubmit = (question: string) => {
     const userMessage: ChatMessageType = {
-      id: `user-${Date.now()}`,
+      id: `pending-user-${Date.now()}`,
       role: 'user',
       content: question,
+      language,
     }
 
-    setMessages((current) => [...current, userMessage, createMockAnswer(question, language)])
+    setMessages((current) => [...current, userMessage])
+    setErrorMessage('')
+    chatMutation.mutate(question)
   }
 
   return (
@@ -63,7 +75,7 @@ export function ChatPanel() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-sm font-semibold text-slate-950">RAG Chat</p>
-            <p className="mt-1 text-xs text-slate-500">Mock assistant with source references</p>
+            <p className="mt-1 text-xs text-slate-500">Answers with source references</p>
           </div>
           <label className="text-xs font-medium text-slate-500">
             Answer
@@ -83,9 +95,19 @@ export function ChatPanel() {
           {messages.map((message) => (
             <ChatMessage key={message.id} message={message} />
           ))}
+          {chatMutation.isPending ? (
+            <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">
+              Generating answer...
+            </div>
+          ) : null}
+          {errorMessage ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {errorMessage}
+            </div>
+          ) : null}
         </div>
         <div className="border-t border-slate-100 p-4">
-          <ChatInput onSubmit={handleQuestionSubmit} />
+          <ChatInput disabled={chatMutation.isPending} onSubmit={handleQuestionSubmit} />
         </div>
       </div>
     </aside>

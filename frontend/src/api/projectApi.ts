@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import type { ChatSession, ChatSessionCreateRequest, RagChatRequest, RagChatResponse } from '../types/chat'
 import type { FileTreeNode, RepositoryScanResult } from '../types/file'
 import type {
   ApiResponse,
@@ -48,6 +49,22 @@ export const projectApi = {
   async getFileTree(projectId: string) {
     const { data } = await apiClient.get<ApiResponse<FileTreeNode[]>>(
       `/api/v1/projects/${projectId}/file-tree`,
+    )
+    return data.data
+  },
+
+  async createChatSession(projectId: string, payload: ChatSessionCreateRequest) {
+    const { data } = await apiClient.post<ApiResponse<ChatSession>>(
+      `/api/v1/projects/${projectId}/chat/sessions`,
+      payload,
+    )
+    return data.data
+  },
+
+  async sendChatMessage(projectId: string, payload: RagChatRequest) {
+    const { data } = await apiClient.post<ApiResponse<RagChatResponse>>(
+      `/api/v1/projects/${projectId}/chat`,
+      payload,
     )
     return data.data
   },
