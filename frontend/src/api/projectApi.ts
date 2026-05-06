@@ -1,5 +1,10 @@
 import { apiClient } from './client'
 import type { ChatSession, ChatSessionCreateRequest, RagChatRequest, RagChatResponse } from '../types/chat'
+import type {
+  DocumentGenerateRequest,
+  DocumentGenerationResult,
+  ProjectDocument,
+} from '../types/document'
 import type { FileTreeNode, RepositoryScanResult } from '../types/file'
 import type {
   ApiResponse,
@@ -65,6 +70,28 @@ export const projectApi = {
     const { data } = await apiClient.post<ApiResponse<RagChatResponse>>(
       `/api/v1/projects/${projectId}/chat`,
       payload,
+    )
+    return data.data
+  },
+
+  async generateDocuments(projectId: string, payload: DocumentGenerateRequest) {
+    const { data } = await apiClient.post<ApiResponse<DocumentGenerationResult>>(
+      `/api/v1/projects/${projectId}/documents/generate`,
+      payload,
+    )
+    return data.data
+  },
+
+  async getDocuments(projectId: string) {
+    const { data } = await apiClient.get<ApiResponse<ProjectDocument[]>>(
+      `/api/v1/projects/${projectId}/documents`,
+    )
+    return data.data
+  },
+
+  async getDocument(projectId: string, documentId: string) {
+    const { data } = await apiClient.get<ApiResponse<ProjectDocument>>(
+      `/api/v1/projects/${projectId}/documents/${documentId}`,
     )
     return data.data
   },
