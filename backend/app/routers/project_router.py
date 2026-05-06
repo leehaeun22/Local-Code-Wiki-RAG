@@ -11,7 +11,18 @@ from app.schemas.project_schema import (
     ProjectRead,
     ProjectUpdate,
 )
+from app.schemas.repository_file_schema import (
+    FileTreeNode,
+    RepositoryFileRead,
+    RepositoryScanResult,
+)
 from app.services import project_service
+from app.services.repository_file_scan_service import (
+    RepositoryScanError,
+    build_file_tree,
+    list_repository_files,
+    scan_repository_files,
+)
 from app.services.repository_clone_service import RepositoryCloneError, clone_repository
 from app.services.project_service import ProjectNotFoundError
 
@@ -88,6 +99,67 @@ def clone_project_repository(
                 task_id=task.id,
             ),
         )
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        ) from exc
+
+
+@router.post("/{project_id}/scan", response_model=ApiResponse[RepositoryScanResult])
+def scan_project_repository_files(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> ApiResponse[RepositoryScanResult]:
+    try:
+        files, task = scan_repository_files(db, project_id)
+        return ApiResponse(
+            data=RepositoryScanResult(
+                project_id=project_id,
+                scanned_file_count=len(files),
+                task_id=task.id,
+            ),
+        )
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        ) from exc
+    except RepositoryScanError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save scan result.",
+        ) from exc
+
+
+@router.get("/{project_id}/files", response_model=ApiResponse[list[RepositoryFileRead]])
+def get_project_repository_files(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> ApiResponse[list[RepositoryFileRead]]:
+    try:
+        return ApiResponse(data=list_repository_files(db, project_id))
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        ) from exc
+
+
+@router.get("/{project_id}/file-tree", response_model=ApiResponse[list[FileTreeNode]])
+def get_project_file_tree(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> ApiResponse[list[FileTreeNode]]:
+    try:
+        files = list_repository_files(db, project_id)
+        return ApiResponse(data=build_file_tree(files))
     except ProjectNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
