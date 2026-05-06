@@ -8,6 +8,8 @@ from app.schemas.document_schema import (
     DocumentGenerateRequest,
     DocumentGenerationResult,
     DocumentRead,
+    DocumentTranslateRequest,
+    DocumentTranslationRead,
 )
 from app.schemas.embedding_schema import (
     EmbeddingGenerationResult,
@@ -38,6 +40,11 @@ from app.services.document_generation_service import (
     generate_documents,
     get_document,
     list_documents,
+)
+from app.services.document_translation_service import (
+    DocumentTranslationError,
+    list_document_translations,
+    translate_document,
 )
 from app.services.embedding_service import (
     EmbeddingGenerationError,
@@ -379,6 +386,59 @@ def get_project_document(
             detail="Project not found.",
         ) from exc
     except DocumentGenerationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(
+    "/{project_id}/documents/{document_id}/translate",
+    response_model=ApiResponse[DocumentTranslationRead],
+)
+def translate_project_document(
+    project_id: str,
+    document_id: str,
+    payload: DocumentTranslateRequest,
+    db: Session = Depends(get_db),
+) -> ApiResponse[DocumentTranslationRead]:
+    try:
+        return ApiResponse(data=translate_document(db, project_id, document_id, payload))
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        ) from exc
+    except DocumentTranslationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save document translation.",
+        ) from exc
+
+
+@router.get(
+    "/{project_id}/documents/{document_id}/translations",
+    response_model=ApiResponse[list[DocumentTranslationRead]],
+)
+def get_project_document_translations(
+    project_id: str,
+    document_id: str,
+    db: Session = Depends(get_db),
+) -> ApiResponse[list[DocumentTranslationRead]]:
+    try:
+        return ApiResponse(data=list_document_translations(db, project_id, document_id))
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        ) from exc
+    except DocumentTranslationError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),

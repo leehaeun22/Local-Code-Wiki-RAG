@@ -40,3 +40,22 @@ class DocumentGenerationResult(BaseModel):
     project_id: str
     generated_document_count: int
     documents: list[DocumentRead]
+
+
+class DocumentTranslateRequest(BaseModel):
+    target_language: DocumentLanguage
+    preserve_terms: bool = True
+
+
+class DocumentTranslationRead(BaseModel):
+    id: str
+    document_id: str
+    language: str
+    title: str
+    content: str
+    translation_status: str
+    preserve_terms: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
