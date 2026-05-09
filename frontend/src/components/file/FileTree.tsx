@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import axios from 'axios'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { projectApi } from '../../api/projectApi'
@@ -72,12 +73,35 @@ function FileTreeItem({
 
 interface FileTreeProps {
   projectId: string
+  projectLocalPath?: string | null
 }
 
-export function FileTree({ projectId }: FileTreeProps) {
+function getErrorMessage(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    const responseDetail = error.response?.data?.detail
+    const responseMessage = error.response?.data?.message
+
+    if (typeof responseDetail === 'string' && responseDetail.trim()) {
+      return responseDetail
+    }
+
+    if (typeof responseMessage === 'string' && responseMessage.trim()) {
+      return responseMessage
+    }
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+
+  return 'Request failed.'
+}
+
+export function FileTree({ projectId, projectLocalPath }: FileTreeProps) {
   const queryClient = useQueryClient()
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
   const [selectedPath, setSelectedPath] = useState('')
+  const [actionError, setActionError] = useState('')
 
   const {
     data: fileTree = [],
@@ -88,12 +112,51 @@ export function FileTree({ projectId }: FileTreeProps) {
     queryFn: () => projectApi.getFileTree(projectId),
   })
 
-  const scanMutation = useMutation({
-    mutationFn: () => projectApi.scanProject(projectId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['project-file-tree', projectId] })
+  const refreshProjectData = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['project', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['project-file-tree', projectId] }),
+    ])
+  }
+
+  const cloneMutation = useMutation({
+    mutationFn: () => projectApi.cloneProject(projectId),
+    onError: (error) => {
+      setActionError(getErrorMessage(error))
+    },
+    onSuccess: async () => {
+      setActionError('')
+      await refreshProjectData()
     },
   })
+
+  const scanMutation = useMutation({
+    mutationFn: () => projectApi.scanProject(projectId),
+    onError: (error) => {
+      setActionError(getErrorMessage(error))
+    },
+    onSuccess: async () => {
+      setActionError('')
+      await refreshProjectData()
+    },
+  })
+
+  const cloneAndScanMutation = useMutation({
+    mutationFn: async () => {
+      await projectApi.cloneProject(projectId)
+      return projectApi.scanProject(projectId)
+    },
+    onError: (error) => {
+      setActionError(getErrorMessage(error))
+    },
+    onSuccess: async () => {
+      setActionError('')
+      await refreshProjectData()
+    },
+  })
+
+  const isWorking =
+    cloneMutation.isPending || scanMutation.isPending || cloneAndScanMutation.isPending
 
   const toggleDirectory = (nodePath: string) => {
     setExpandedIds((current) => {
@@ -117,18 +180,38 @@ export function FileTree({ projectId }: FileTreeProps) {
             <p className="text-sm font-semibold text-slate-950">File Tree</p>
             <p className="mt-1 text-xs text-slate-500">Repository scan result</p>
           </div>
-          <button
-            className="h-8 rounded-md bg-slate-950 px-3 text-xs font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-            disabled={scanMutation.isPending}
-            onClick={() => scanMutation.mutate()}
-            type="button"
-          >
-            {scanMutation.isPending ? 'Scanning...' : 'Scan'}
-          </button>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              className="h-8 rounded-md border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+              disabled={isWorking}
+              onClick={() => cloneMutation.mutate()}
+              type="button"
+            >
+              {cloneMutation.isPending ? 'Cloning...' : 'Clone'}
+            </button>
+            <button
+              className="h-8 rounded-md border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+              disabled={isWorking || !projectLocalPath}
+              onClick={() => scanMutation.mutate()}
+              type="button"
+            >
+              {scanMutation.isPending ? 'Scanning...' : 'Scan'}
+            </button>
+            <button
+              className="h-8 rounded-md bg-slate-950 px-3 text-xs font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+              disabled={isWorking}
+              onClick={() => cloneAndScanMutation.mutate()}
+              type="button"
+            >
+              {cloneAndScanMutation.isPending ? 'Running...' : 'Clone and Scan'}
+            </button>
+          </div>
         </div>
-        {scanMutation.isError ? (
-          <p className="mt-3 text-xs leading-5 text-red-600">
-            Scan failed. Clone the repository first and check the backend logs.
+        {actionError ? (
+          <p className="mt-3 text-xs leading-5 text-red-600">{actionError}</p>
+        ) : !projectLocalPath ? (
+          <p className="mt-3 text-xs leading-5 text-slate-500">
+            Repository를 먼저 clone하고 scan을 실행하세요.
           </p>
         ) : null}
       </div>
@@ -142,7 +225,7 @@ export function FileTree({ projectId }: FileTreeProps) {
         ) : null}
         {!isLoading && !isError && fileTree.length === 0 ? (
           <p className="px-2 py-3 text-sm leading-6 text-slate-500">
-            No files scanned yet. Run scan after cloning the repository.
+            Repository를 먼저 clone하고 scan을 실행하세요.
           </p>
         ) : null}
         {fileTree.map((node) => (

@@ -19,6 +19,8 @@ export interface Project {
   repository_url: string
   branch: string
   description: string | null
+  local_path: string | null
+  last_commit_hash: string | null
   settings: ProjectSetting | null
   created_at: string
   updated_at: string
@@ -38,3 +40,10 @@ export interface ProjectCreateRequest {
 }
 
 export type ProjectUpdateRequest = Partial<ProjectCreateRequest>
+
+export interface ProjectCloneResult {
+  project_id: string
+  local_path: string
+  commit_hash: string
+  task_id: string
+}

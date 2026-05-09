@@ -9,6 +9,7 @@ import type { FileTreeNode, RepositoryScanResult } from '../types/file'
 import type {
   ApiResponse,
   Project,
+  ProjectCloneResult,
   ProjectCreateRequest,
   ProjectUpdateRequest,
 } from '../types/project'
@@ -40,6 +41,13 @@ export const projectApi = {
   async deleteProject(projectId: string) {
     const { data } = await apiClient.delete<ApiResponse<{ id: string }>>(
       `/api/v1/projects/${projectId}`,
+    )
+    return data.data
+  },
+
+  async cloneProject(projectId: string) {
+    const { data } = await apiClient.post<ApiResponse<ProjectCloneResult>>(
+      `/api/v1/projects/${projectId}/clone`,
     )
     return data.data
   },
