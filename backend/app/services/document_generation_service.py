@@ -14,7 +14,7 @@ class DocumentGenerationError(Exception):
     pass
 
 
-INSUFFICIENT_DATA_MESSAGE = "분석 데이터가 부족합니다"
+INSUFFICIENT_DATA_MESSAGE = "분석 데이터가 부족합니다."
 DOCUMENT_TITLES: dict[str, str] = {
     "overview": "Project Overview",
     "folder_structure": "Folder Structure",
@@ -143,43 +143,113 @@ def _generate_markdown_document(
     code_chunks: list[CodeChunk],
 ) -> str:
     if not settings.openai_api_key:
-        raise DocumentGenerationError("OPENAI_API_KEY is required to generate documents.")
+        return _generate_local_markdown_document(
+            project_name=project_name,
+            repository_url=repository_url,
+            document_type=document_type,
+            language=language,
+            repository_files=repository_files,
+            code_chunks=code_chunks,
+        )
 
     from openai import OpenAI
 
-    client = OpenAI(api_key=settings.openai_api_key)
-    context = _build_document_context(repository_files, code_chunks)
-    language_instruction = "Write in Korean." if language == "ko" else "Write in English."
-    response = client.chat.completions.create(
-        model=settings.openai_chat_model,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You generate markdown documentation from analyzed repository files and "
-                    "code chunks. Use only the provided context. If the context is insufficient, "
-                    f"return exactly: {INSUFFICIENT_DATA_MESSAGE}. "
-                    f"{language_instruction}"
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Project: {project_name}\n"
-                    f"Repository URL: {repository_url}\n"
-                    f"Document type: {document_type}\n\n"
-                    f"Context:\n{context}"
-                ),
-            },
-        ],
-        temperature=0.2,
+    try:
+        client = OpenAI(api_key=settings.openai_api_key)
+        context = _build_document_context(repository_files, code_chunks)
+        language_instruction = "Write in Korean." if language == "ko" else "Write in English."
+        response = client.chat.completions.create(
+            model=settings.openai_chat_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You generate markdown documentation from analyzed repository files and "
+                        "code chunks. Use only the provided context. If the context is insufficient, "
+                        f"return exactly: {INSUFFICIENT_DATA_MESSAGE}. "
+                        f"{language_instruction}"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Project: {project_name}\n"
+                        f"Repository URL: {repository_url}\n"
+                        f"Document type: {document_type}\n\n"
+                        f"Context:\n{context}"
+                    ),
+                },
+            ],
+            temperature=0.2,
+        )
+        content = response.choices[0].message.content
+
+        if content:
+            return content
+    except Exception:
+        pass
+
+    return _generate_local_markdown_document(
+        project_name=project_name,
+        repository_url=repository_url,
+        document_type=document_type,
+        language=language,
+        repository_files=repository_files,
+        code_chunks=code_chunks,
     )
-    content = response.choices[0].message.content
 
-    if not content:
-        raise DocumentGenerationError("LLM returned an empty document.")
 
-    return content
+def _generate_local_markdown_document(
+    project_name: str,
+    repository_url: str,
+    document_type: DocumentType,
+    language: str,
+    repository_files: list[RepositoryFile],
+    code_chunks: list[CodeChunk],
+) -> str:
+    heading = DOCUMENT_TITLES[document_type]
+    file_lines = [
+        f"- `{file.file_path}` ({file.language or 'unknown'}, {file.size_bytes} bytes)"
+        for file in repository_files[:30]
+    ]
+    chunk_lines = [
+        "\n".join(
+            [
+                f"### {chunk.file.file_path}:{chunk.start_line}-{chunk.end_line}",
+                "```",
+                chunk.content[:1200],
+                "```",
+            ],
+        )
+        for chunk in code_chunks[:8]
+    ]
+
+    if language == "ko":
+        return "\n\n".join(
+            [
+                f"# {heading}",
+                f"프로젝트: **{project_name}**",
+                f"저장소: {repository_url}",
+                "OpenAI API 키가 없어서 로컬 분석 데이터로 문서를 생성했습니다.",
+                "## 스캔된 파일",
+                "\n".join(file_lines),
+                "## 주요 코드 청크",
+                "\n\n".join(chunk_lines),
+            ],
+        )
+
+    return "\n\n".join(
+        [
+            f"# {heading}",
+            f"Project: **{project_name}**",
+            f"Repository: {repository_url}",
+            "OpenAI API key is not configured, so this document was generated from local analysis data.",
+            "## Scanned Files",
+            "\n".join(file_lines),
+            "## Representative Code Chunks",
+            "\n\n".join(chunk_lines),
+        ],
+    )
 
 
 def _build_document_context(

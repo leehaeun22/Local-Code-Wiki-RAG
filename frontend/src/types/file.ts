@@ -12,3 +12,9 @@ export interface RepositoryScanResult {
   scanned_file_count: number
   task_id: string
 }
+
+export interface CodeChunkGenerationResult {
+  project_id: string
+  generated_chunk_count: number
+  task_id: string
+}

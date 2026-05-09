@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import axios from 'axios'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 
@@ -9,10 +10,32 @@ interface DocumentViewerProps {
   projectId: string
 }
 
+function getErrorMessage(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    const responseDetail = error.response?.data?.detail
+    const responseMessage = error.response?.data?.message
+
+    if (typeof responseDetail === 'string' && responseDetail.trim()) {
+      return responseDetail
+    }
+
+    if (typeof responseMessage === 'string' && responseMessage.trim()) {
+      return responseMessage
+    }
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+
+  return 'Request failed.'
+}
+
 export function DocumentViewer({ projectId }: DocumentViewerProps) {
   const queryClient = useQueryClient()
   const [language, setLanguage] = useState<DocumentLanguage>('ko')
   const [selectedDocumentId, setSelectedDocumentId] = useState('')
+  const [actionError, setActionError] = useState('')
 
   const documentsQuery = useQuery({
     queryKey: ['project-documents', projectId],
@@ -33,9 +56,26 @@ export function DocumentViewer({ projectId }: DocumentViewerProps) {
     onSuccess: (result) => {
       const firstDocument = result.documents[0]
       setSelectedDocumentId(firstDocument?.id ?? '')
+      setActionError('')
       void queryClient.invalidateQueries({ queryKey: ['project-documents', projectId] })
     },
+    onError: (error) => {
+      setActionError(getErrorMessage(error))
+    },
   })
+
+  const prepareMutation = useMutation({
+    mutationFn: () => projectApi.generateCodeChunks(projectId),
+    onSuccess: async () => {
+      setActionError('')
+      await queryClient.invalidateQueries({ queryKey: ['project-documents', projectId] })
+    },
+    onError: (error) => {
+      setActionError(getErrorMessage(error))
+    },
+  })
+
+  const isWorking = generateMutation.isPending || prepareMutation.isPending
 
   useEffect(() => {
     if (!selectedDocumentId && selectedDocumentIdFromList) {
@@ -67,8 +107,16 @@ export function DocumentViewer({ projectId }: DocumentViewerProps) {
               </select>
             </label>
             <button
+              className="h-9 rounded-md border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+              disabled={isWorking}
+              onClick={() => prepareMutation.mutate()}
+              type="button"
+            >
+              {prepareMutation.isPending ? 'Preparing...' : 'Prepare Docs'}
+            </button>
+            <button
               className="h-9 rounded-md bg-slate-950 px-3 text-xs font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-              disabled={generateMutation.isPending}
+              disabled={isWorking}
               onClick={() => generateMutation.mutate()}
               type="button"
             >
@@ -76,10 +124,8 @@ export function DocumentViewer({ projectId }: DocumentViewerProps) {
             </button>
           </div>
         </div>
-        {generateMutation.isError ? (
-          <p className="mt-3 text-sm text-red-600">
-            Failed to generate documents. Check analyzed data and backend logs.
-          </p>
+        {actionError ? (
+          <p className="mt-3 text-sm text-red-600">{actionError}</p>
         ) : null}
       </div>
 
