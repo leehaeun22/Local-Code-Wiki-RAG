@@ -77,6 +77,7 @@ def answer_chat(db: Session, project_id: str, payload: ChatRequest) -> tuple[Cha
             question=payload.question,
             context=context,
             language=payload.language,
+            search_results=search_results,
         )
 
         user_message = ChatMessage(
@@ -171,29 +172,77 @@ def _build_context(search_results: list[dict[str, Any]]) -> str:
     return "\n\n---\n\n".join(blocks)
 
 
-def _generate_answer(question: str, context: str, language: str) -> str:
+def _generate_answer(
+    question: str,
+    context: str,
+    language: str,
+    search_results: list[dict[str, Any]],
+) -> str:
     if not settings.openai_api_key:
-        raise RagChatError("OPENAI_API_KEY is required to generate chat answers.")
+        return _generate_local_answer(question=question, context=context, language=language, search_results=search_results)
 
     from openai import OpenAI
 
-    client = OpenAI(api_key=settings.openai_api_key)
-    language_instruction = "Answer in Korean." if language == "ko" else "Answer in English."
-    response = client.chat.completions.create(
-        model=settings.openai_chat_model,
-        messages=[
-            {"role": "system", "content": f"{SYSTEM_PROMPT}\n{language_instruction}"},
-            {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{question}"},
-        ],
-        temperature=0.2,
+    try:
+        client = OpenAI(api_key=settings.openai_api_key)
+        language_instruction = "Answer in Korean." if language == "ko" else "Answer in English."
+        response = client.chat.completions.create(
+            model=settings.openai_chat_model,
+            messages=[
+                {"role": "system", "content": f"{SYSTEM_PROMPT}\n{language_instruction}"},
+                {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{question}"},
+            ],
+            temperature=0.2,
+        )
+
+        content = response.choices[0].message.content
+
+        if content:
+            return content
+    except Exception:
+        pass
+
+    return _generate_local_answer(question=question, context=context, language=language, search_results=search_results)
+
+
+def _generate_local_answer(
+    question: str,
+    context: str,
+    language: str,
+    search_results: list[dict[str, Any]],
+) -> str:
+    if language == "ko":
+        if not search_results:
+            return (
+                "현재 저장된 코드 청크에서 관련 내용을 찾지 못했습니다. "
+                "먼저 저장소 스캔과 코드 청크 생성을 실행한 뒤 다시 질문해 주세요."
+            )
+
+        lines = [
+            "OpenAI API 키가 없어서 로컬 컨텍스트 기반으로만 답변합니다.",
+            "찾은 관련 파일:",
+        ]
+        lines.extend(
+            f"- {result['file_path']}:{result['start_line']}-{result['end_line']}" for result in search_results[:3]
+        )
+        lines.append("질문에 맞는 세부 설명이 필요하면 코드 청크와 임베딩 생성 후 다시 시도해 주세요.")
+        return "\n".join(lines)
+
+    if not search_results:
+        return (
+            "I couldn't find relevant content in the stored code chunks yet. "
+            "Run repository scanning and chunk generation first, then ask again."
+        )
+
+    lines = [
+        "OpenAI API key is not configured, so this answer is based only on local repository context.",
+        "Relevant files found:",
+    ]
+    lines.extend(
+        f"- {result['file_path']}:{result['start_line']}-{result['end_line']}" for result in search_results[:3]
     )
-
-    content = response.choices[0].message.content
-
-    if not content:
-        raise RagChatError("LLM returned an empty answer.")
-
-    return content
+    lines.append("If you need a fuller answer, generate code chunks and embeddings first.")
+    return "\n".join(lines)
 
 
 def _snippet(content: str, max_length: int = 500) -> str:

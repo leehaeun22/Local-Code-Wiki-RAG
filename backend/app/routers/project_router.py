@@ -102,8 +102,12 @@ def create_project(
 
 @router.get("", response_model=ApiResponse[list[ProjectRead]])
 def list_projects(db: Session = Depends(get_db)) -> ApiResponse[list[ProjectRead]]:
-    projects = project_service.list_projects(db)
-    return ApiResponse(data=[_to_project_read(project) for project in projects])
+    try:
+        projects = project_service.list_projects(db)
+        return ApiResponse(data=[_to_project_read(project) for project in projects])
+    except Exception:
+        # Keep the project list page usable when the local Postgres stack is not running yet.
+        return ApiResponse(data=[])
 
 
 @router.get("/{project_id}", response_model=ApiResponse[ProjectRead])

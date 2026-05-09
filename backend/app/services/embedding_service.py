@@ -59,6 +59,70 @@ def _chunk_metadata(chunk: CodeChunk) -> dict[str, Any]:
     }
 
 
+def _tokenize_query(query: str) -> list[str]:
+    return [token for token in re.findall(r"\w+", query.lower(), flags=re.UNICODE) if len(token) > 1]
+
+
+def _score_chunk_for_query(query: str, chunk: CodeChunk) -> float:
+    tokens = _tokenize_query(query)
+
+    if not tokens:
+        return 0.0
+
+    haystack = f"{chunk.file.file_path}\n{chunk.content}".lower()
+    score = 0.0
+
+    for token in tokens:
+        if token in haystack:
+            score += 1.0
+
+    if query.lower() in haystack:
+        score += 2.0
+
+    return score
+
+
+def _fallback_search_project_chunks(
+    db: Session,
+    project_id: str,
+    query: str,
+    top_k: int,
+) -> list[dict[str, Any]]:
+    chunks = _list_chunks(db, project_id)
+
+    ranked_chunks = sorted(
+        chunks,
+        key=lambda chunk: (
+            _score_chunk_for_query(query, chunk),
+            chunk.created_at,
+        ),
+        reverse=True,
+    )
+
+    results: list[dict[str, Any]] = []
+
+    for chunk in ranked_chunks[:top_k]:
+        score = _score_chunk_for_query(query, chunk)
+
+        if score <= 0:
+            continue
+
+        results.append(
+            {
+                "chunk_id": chunk.id,
+                "file_id": chunk.file_id,
+                "file_path": chunk.file.file_path,
+                "start_line": chunk.start_line,
+                "end_line": chunk.end_line,
+                "content": chunk.content,
+                "distance": 1 / (1 + score),
+                "metadata": _chunk_metadata(chunk),
+            },
+        )
+
+    return results
+
+
 def generate_embeddings(
     db: Session,
     project_id: str,
@@ -138,44 +202,51 @@ def search_project_chunks(
         raise
 
     collection_name = _collection_name(project_id)
-    embedding_provider = embedding_provider or OpenAIEmbeddingProvider()
-    vector_store = vector_store or ChromaVectorStore()
-    query_embedding = embedding_provider.embed_query(query)
-    results = vector_store.search(collection_name, query_embedding, top_k)
-    chunk_ids = [item["id"] for item in results]
 
-    if not chunk_ids:
-        return []
+    try:
+        embedding_provider = embedding_provider or OpenAIEmbeddingProvider()
+        vector_store = vector_store or ChromaVectorStore()
+        query_embedding = embedding_provider.embed_query(query)
+        results = vector_store.search(collection_name, query_embedding, top_k)
+        chunk_ids = [item["id"] for item in results]
 
-    chunks_by_id = {
-        chunk.id: chunk
-        for chunk in db.scalars(
-            select(CodeChunk)
-            .options(selectinload(CodeChunk.file))
-            .where(CodeChunk.id.in_(chunk_ids)),
-        ).all()
-    }
+        if not chunk_ids:
+            return _fallback_search_project_chunks(db, project_id, query, top_k)
 
-    hydrated_results: list[dict[str, Any]] = []
+        chunks_by_id = {
+            chunk.id: chunk
+            for chunk in db.scalars(
+                select(CodeChunk)
+                .options(selectinload(CodeChunk.file))
+                .where(CodeChunk.id.in_(chunk_ids)),
+            ).all()
+        }
 
-    for item in results:
-        chunk = chunks_by_id.get(item["id"])
+        hydrated_results: list[dict[str, Any]] = []
 
-        if chunk is None:
-            continue
+        for item in results:
+            chunk = chunks_by_id.get(item["id"])
 
-        metadata = item["metadata"] or {}
-        hydrated_results.append(
-            {
-                "chunk_id": chunk.id,
-                "file_id": chunk.file_id,
-                "file_path": chunk.file.file_path,
-                "start_line": chunk.start_line,
-                "end_line": chunk.end_line,
-                "content": chunk.content,
-                "distance": item.get("distance"),
-                "metadata": metadata,
-            },
-        )
+            if chunk is None:
+                continue
 
-    return hydrated_results
+            metadata = item["metadata"] or {}
+            hydrated_results.append(
+                {
+                    "chunk_id": chunk.id,
+                    "file_id": chunk.file_id,
+                    "file_path": chunk.file.file_path,
+                    "start_line": chunk.start_line,
+                    "end_line": chunk.end_line,
+                    "content": chunk.content,
+                    "distance": item.get("distance"),
+                    "metadata": metadata,
+                },
+            )
+
+        if hydrated_results:
+            return hydrated_results
+    except Exception:
+        pass
+
+    return _fallback_search_project_chunks(db, project_id, query, top_k)

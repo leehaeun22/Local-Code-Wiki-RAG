@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import axios from 'axios'
 import { useMutation } from '@tanstack/react-query'
 
 import { projectApi } from '../../api/projectApi'
@@ -17,6 +18,27 @@ const initialMessages: ChatMessageType[] = [
 
 interface ChatPanelProps {
   projectId: string
+}
+
+function getErrorMessage(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    const responseDetail = error.response?.data?.detail
+    const responseMessage = error.response?.data?.message
+
+    if (typeof responseDetail === 'string' && responseDetail.trim()) {
+      return responseDetail
+    }
+
+    if (typeof responseMessage === 'string' && responseMessage.trim()) {
+      return responseMessage
+    }
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+
+  return 'Failed to get an answer.'
 }
 
 export function ChatPanel({ projectId }: ChatPanelProps) {
@@ -44,10 +66,8 @@ export function ChatPanel({ projectId }: ChatPanelProps) {
         top_k: 5,
       })
     },
-    onError: () => {
-      setErrorMessage(
-        'Failed to get an answer. Check that embeddings are generated and the backend API is running.',
-      )
+    onError: (error) => {
+      setErrorMessage(getErrorMessage(error))
     },
     onSuccess: (response) => {
       setSession(response.session)
