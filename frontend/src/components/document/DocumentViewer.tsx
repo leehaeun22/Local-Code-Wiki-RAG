@@ -42,8 +42,9 @@ export function DocumentViewer({ projectId }: DocumentViewerProps) {
     queryFn: () => projectApi.getDocuments(projectId),
   })
   const documents = documentsQuery.data ?? []
+  const visibleDocuments = documents.filter((document) => document.language === language)
   const selectedDocumentIdFromList =
-    selectedDocumentId || documents.find((document) => document.language === language)?.id || ''
+    selectedDocumentId || visibleDocuments[0]?.id || ''
 
   const documentQuery = useQuery({
     queryKey: ['project-document', projectId, selectedDocumentIdFromList],
@@ -53,11 +54,15 @@ export function DocumentViewer({ projectId }: DocumentViewerProps) {
 
   const generateMutation = useMutation({
     mutationFn: () => projectApi.generateDocuments(projectId, { language }),
-    onSuccess: (result) => {
-      const firstDocument = result.documents[0]
+    onSuccess: async (result) => {
+      const documents = await queryClient.fetchQuery({
+        queryKey: ['project-documents', projectId],
+        queryFn: () => projectApi.getDocuments(projectId),
+      })
+      const firstDocument =
+        documents.find((document) => document.language === language) ?? result.documents[0]
       setSelectedDocumentId(firstDocument?.id ?? '')
       setActionError('')
-      void queryClient.invalidateQueries({ queryKey: ['project-documents', projectId] })
     },
     onError: (error) => {
       setActionError(getErrorMessage(error))
@@ -82,6 +87,17 @@ export function DocumentViewer({ projectId }: DocumentViewerProps) {
       setSelectedDocumentId(selectedDocumentIdFromList)
     }
   }, [selectedDocumentId, selectedDocumentIdFromList])
+
+  useEffect(() => {
+    const selectedDocumentExists = documents.some(
+      (document) => document.language === language && document.id === selectedDocumentId,
+    )
+
+    if (selectedDocumentId && !selectedDocumentExists) {
+      const firstVisibleDocument = documents.find((document) => document.language === language)
+      setSelectedDocumentId(firstVisibleDocument?.id ?? '')
+    }
+  }, [documents, language, selectedDocumentId])
 
   return (
     <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -137,34 +153,37 @@ export function DocumentViewer({ projectId }: DocumentViewerProps) {
           {documentsQuery.isError ? (
             <p className="text-sm text-red-600">Failed to load documents.</p>
           ) : null}
-          {!documentsQuery.isLoading && !documentsQuery.isError && documents.length === 0 ? (
+          {!documentsQuery.isLoading && !documentsQuery.isError && visibleDocuments.length === 0 ? (
             <p className="text-sm leading-6 text-slate-500">
-              No documents yet. Generate markdown documentation from analyzed code.
+              아직 생성된 문서가 없습니다. Prepare Docs 후 Generate를 실행하세요.
             </p>
           ) : null}
           <div className="space-y-2">
-            {documents
-              .filter((document) => document.language === language)
-              .map((document) => (
-                <button
-                  className={[
-                    'w-full rounded-md px-3 py-2 text-left text-sm transition',
-                    selectedDocumentIdFromList === document.id
-                      ? 'bg-sky-50 font-medium text-sky-800'
-                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950',
-                  ].join(' ')}
-                  key={document.id}
-                  onClick={() => setSelectedDocumentId(document.id)}
-                  type="button"
-                >
-                  <span className="block">{document.title}</span>
-                  <span className="mt-1 block text-xs text-slate-400">{document.document_type}</span>
-                </button>
-              ))}
+            {visibleDocuments.map((document) => (
+              <button
+                className={[
+                  'w-full rounded-md px-3 py-2 text-left text-sm transition',
+                  selectedDocumentIdFromList === document.id
+                    ? 'bg-sky-50 font-medium text-sky-800'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950',
+                ].join(' ')}
+                key={document.id}
+                onClick={() => setSelectedDocumentId(document.id)}
+                type="button"
+              >
+                <span className="block">{document.title}</span>
+                <span className="mt-1 block text-xs text-slate-400">{document.document_type}</span>
+              </button>
+            ))}
           </div>
         </aside>
 
         <div className="min-w-0 p-6">
+          {generateMutation.isPending ? (
+            <p className="mb-4 rounded-md bg-slate-50 p-3 text-sm text-slate-500">
+              Generating documents from prepared chunks...
+            </p>
+          ) : null}
           {documentQuery.isLoading ? (
             <p className="text-sm text-slate-500">Loading document...</p>
           ) : null}
@@ -172,7 +191,9 @@ export function DocumentViewer({ projectId }: DocumentViewerProps) {
             <p className="text-sm text-red-600">Failed to load selected document.</p>
           ) : null}
           {!selectedDocumentIdFromList && !documentsQuery.isLoading ? (
-            <p className="text-sm text-slate-500">Select or generate a document.</p>
+            <p className="text-sm text-slate-500">
+              아직 생성된 문서가 없습니다. Prepare Docs 후 Generate를 실행하세요.
+            </p>
           ) : null}
           {documentQuery.data ? (
             <div className="max-w-none space-y-4 text-sm leading-7 text-slate-700 [&_code]:rounded [&_code]:bg-slate-100 [&_code]:px-1 [&_code]:py-0.5 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:text-slate-950 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-slate-950 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-slate-950 [&_li]:ml-5 [&_li]:list-disc [&_pre]:overflow-auto [&_pre]:rounded-lg [&_pre]:bg-slate-950 [&_pre]:p-4 [&_pre]:text-slate-100">

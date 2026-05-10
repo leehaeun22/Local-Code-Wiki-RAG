@@ -14,7 +14,9 @@ class DocumentGenerationError(Exception):
     pass
 
 
-INSUFFICIENT_DATA_MESSAGE = "분석 데이터가 부족합니다."
+INSUFFICIENT_DATA_MESSAGE = (
+    "분석 데이터가 부족합니다. 먼저 repository scan과 Prepare Docs(chunk generation)를 실행하세요."
+)
 DOCUMENT_TITLES: dict[str, str] = {
     "overview": "Project Overview",
     "folder_structure": "Folder Structure",
@@ -47,6 +49,9 @@ def generate_documents(db: Session, project_id: str, payload: DocumentGenerateRe
         ).all(),
     )
 
+    if _has_insufficient_data(repository_files, code_chunks):
+        raise DocumentGenerationError(INSUFFICIENT_DATA_MESSAGE)
+
     commit = _find_commit(db, project_id, project.last_commit_hash)
     generated_documents: list[Document] = []
 
@@ -59,17 +64,13 @@ def generate_documents(db: Session, project_id: str, payload: DocumentGenerateRe
     )
 
     for document_type in payload.document_types:
-        content = (
-            INSUFFICIENT_DATA_MESSAGE
-            if _has_insufficient_data(repository_files, code_chunks)
-            else _generate_markdown_document(
-                project_name=project.name,
-                repository_url=project.repository_url,
-                document_type=document_type,
-                language=payload.language,
-                repository_files=repository_files,
-                code_chunks=code_chunks,
-            )
+        content = _generate_markdown_document(
+            project_name=project.name,
+            repository_url=project.repository_url,
+            document_type=document_type,
+            language=payload.language,
+            repository_files=repository_files,
+            code_chunks=code_chunks,
         )
         document = Document(
             project_id=project_id,
@@ -230,7 +231,7 @@ def _generate_local_markdown_document(
                 f"# {heading}",
                 f"프로젝트: **{project_name}**",
                 f"저장소: {repository_url}",
-                "OpenAI API 키가 없어서 로컬 분석 데이터로 문서를 생성했습니다.",
+                "OpenAI API 키가 없어 로컬 분석 데이터만 사용해 문서를 생성했습니다.",
                 "## 스캔된 파일",
                 "\n".join(file_lines),
                 "## 주요 코드 청크",

@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 from sqlalchemy import select
@@ -6,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.config import settings
 from app.models.chat_message import ChatMessage
 from app.models.chat_session import ChatSession
+from app.models.document import Document
 from app.models.message_reference import MessageReference
 from app.schemas.chat_schema import ChatRequest, ChatSessionCreate
 from app.services.embedding_service import EmbeddingGenerationError, search_project_chunks
@@ -72,6 +74,13 @@ def answer_chat(db: Session, project_id: str, payload: ChatRequest) -> tuple[Cha
             query=payload.question,
             top_k=payload.top_k,
         )
+        search_results = _with_document_results(
+            db=db,
+            project_id=project_id,
+            query=payload.question,
+            top_k=payload.top_k,
+            chunk_results=search_results,
+        )
         context = _build_context(search_results)
         answer = _generate_answer(
             question=payload.question,
@@ -99,15 +108,15 @@ def answer_chat(db: Session, project_id: str, payload: ChatRequest) -> tuple[Cha
         for result in search_results:
             reference = MessageReference(
                 message_id=assistant_message.id,
-                file_id=result["file_id"],
-                chunk_id=result["chunk_id"],
-                document_id=None,
-                file_path=result["file_path"],
-                start_line=result["start_line"],
-                end_line=result["end_line"],
+                file_id=result.get("file_id"),
+                chunk_id=result.get("chunk_id"),
+                document_id=result.get("document_id"),
+                file_path=result.get("file_path"),
+                start_line=result.get("start_line"),
+                end_line=result.get("end_line"),
                 snippet=_snippet(result["content"]),
                 score=_score_from_distance(result.get("distance")),
-                summary=f"{result['file_path']}:{result['start_line']}-{result['end_line']}",
+                summary=_reference_summary(result),
             )
             db.add(reference)
 
@@ -163,7 +172,7 @@ def _build_context(search_results: list[dict[str, Any]]) -> str:
         blocks.append(
             "\n".join(
                 [
-                    f"[{index}] {result['file_path']}:{result['start_line']}-{result['end_line']}",
+                    f"[{index}] {_reference_summary(result)}",
                     result["content"],
                 ],
             ),
@@ -211,38 +220,139 @@ def _generate_local_answer(
     language: str,
     search_results: list[dict[str, Any]],
 ) -> str:
+    del question, context
+
     if language == "ko":
         if not search_results:
             return (
-                "현재 저장된 코드 청크에서 관련 내용을 찾지 못했습니다. "
-                "먼저 저장소 스캔과 코드 청크 생성을 실행한 뒤 다시 질문해 주세요."
+                "저장된 code_chunks 또는 documents에서 관련 내용을 찾지 못했습니다. "
+                "먼저 scan, chunk generation, document generation을 실행한 뒤 다시 질문하세요."
             )
 
         lines = [
-            "OpenAI API 키가 없어서 로컬 컨텍스트 기반으로만 답변합니다.",
-            "찾은 관련 파일:",
+            "OpenAI API 키가 없어 로컬 저장소 context만 사용해 답변합니다.",
+            "찾은 참고 근거:",
         ]
-        lines.extend(
-            f"- {result['file_path']}:{result['start_line']}-{result['end_line']}" for result in search_results[:3]
-        )
-        lines.append("질문에 맞는 세부 설명이 필요하면 코드 청크와 임베딩 생성 후 다시 시도해 주세요.")
+        lines.extend(f"- {_reference_summary(result)}" for result in search_results[:3])
+        lines.append("더 자세한 설명이 필요하면 OpenAI API 키와 ChromaDB를 설정한 뒤 다시 질문하세요.")
         return "\n".join(lines)
 
     if not search_results:
         return (
-            "I couldn't find relevant content in the stored code chunks yet. "
-            "Run repository scanning and chunk generation first, then ask again."
+            "I couldn't find relevant content in stored code chunks or documents. "
+            "Run scan, chunk generation, and document generation first, then ask again."
         )
 
     lines = [
         "OpenAI API key is not configured, so this answer is based only on local repository context.",
-        "Relevant files found:",
+        "References found:",
     ]
-    lines.extend(
-        f"- {result['file_path']}:{result['start_line']}-{result['end_line']}" for result in search_results[:3]
-    )
-    lines.append("If you need a fuller answer, generate code chunks and embeddings first.")
+    lines.extend(f"- {_reference_summary(result)}" for result in search_results[:3])
+    lines.append("For a fuller answer, configure an OpenAI API key and ChromaDB, then ask again.")
     return "\n".join(lines)
+
+
+def _with_document_results(
+    db: Session,
+    project_id: str,
+    query: str,
+    top_k: int,
+    chunk_results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if len(chunk_results) >= top_k:
+        return chunk_results[:top_k]
+
+    document_results = _fallback_search_project_documents(db, project_id, query, top_k)
+    combined = [*chunk_results]
+    existing_document_ids = {result.get("document_id") for result in combined if result.get("document_id")}
+
+    for result in document_results:
+        document_id = result.get("document_id")
+
+        if document_id in existing_document_ids:
+            continue
+
+        combined.append(result)
+
+        if len(combined) >= top_k:
+            break
+
+    return combined
+
+
+def _fallback_search_project_documents(
+    db: Session,
+    project_id: str,
+    query: str,
+    top_k: int,
+) -> list[dict[str, Any]]:
+    documents = list(
+        db.scalars(
+            select(Document)
+            .where(Document.project_id == project_id)
+            .order_by(Document.updated_at.desc()),
+        ).all(),
+    )
+    ranked_documents = sorted(
+        documents,
+        key=lambda document: (_score_text_for_query(query, f"{document.title}\n{document.content}"), document.updated_at),
+        reverse=True,
+    )
+    results: list[dict[str, Any]] = []
+
+    for document in ranked_documents[:top_k]:
+        score = _score_text_for_query(query, f"{document.title}\n{document.content}")
+
+        if score <= 0:
+            continue
+
+        results.append(
+            {
+                "chunk_id": None,
+                "document_id": document.id,
+                "file_id": document.file_id,
+                "file_path": f"documents/{document.document_type}.{document.language}.md",
+                "start_line": None,
+                "end_line": None,
+                "content": document.content,
+                "distance": 1 / (1 + score),
+                "metadata": {"document_type": document.document_type, "title": document.title},
+            },
+        )
+
+    return results
+
+
+def _score_text_for_query(query: str, text: str) -> float:
+    tokens = [token for token in re.findall(r"\w+", query.lower(), flags=re.UNICODE) if len(token) > 1]
+
+    if not tokens:
+        return 0.0
+
+    haystack = text.lower()
+    score = 0.0
+
+    for token in tokens:
+        if token in haystack:
+            score += 1.0
+
+    if query.lower() in haystack:
+        score += 2.0
+
+    return score
+
+
+def _reference_summary(result: dict[str, Any]) -> str:
+    file_path = result.get("file_path") or "Generated document"
+    start_line = result.get("start_line")
+    end_line = result.get("end_line")
+
+    if start_line is None or end_line is None:
+        metadata = result.get("metadata") or {}
+        title = metadata.get("title")
+        return f"{file_path} ({title})" if title else file_path
+
+    return f"{file_path}:{start_line}-{end_line}"
 
 
 def _snippet(content: str, max_length: int = 500) -> str:
