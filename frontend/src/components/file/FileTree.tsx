@@ -116,6 +116,8 @@ export function FileTree({ projectId, projectLocalPath }: FileTreeProps) {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['project', projectId] }),
       queryClient.invalidateQueries({ queryKey: ['project-file-tree', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['project-code-chunks', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['project-documents', projectId] }),
     ])
   }
 

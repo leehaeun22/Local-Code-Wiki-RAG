@@ -41,7 +41,19 @@ export function DocumentViewer({ projectId }: DocumentViewerProps) {
     queryKey: ['project-documents', projectId],
     queryFn: () => projectApi.getDocuments(projectId),
   })
+  const fileTreeQuery = useQuery({
+    queryKey: ['project-file-tree', projectId],
+    queryFn: () => projectApi.getFileTree(projectId),
+  })
+  const codeChunksQuery = useQuery({
+    queryKey: ['project-code-chunks', projectId],
+    queryFn: () => projectApi.getCodeChunks(projectId),
+  })
   const documents = documentsQuery.data ?? []
+  const fileTree = fileTreeQuery.data ?? []
+  const codeChunks = codeChunksQuery.data ?? []
+  const hasScannedFiles = fileTree.length > 0
+  const hasCodeChunks = codeChunks.length > 0
   const visibleDocuments = documents.filter((document) => document.language === language)
   const selectedDocumentIdFromList =
     selectedDocumentId || visibleDocuments[0]?.id || ''
@@ -73,7 +85,10 @@ export function DocumentViewer({ projectId }: DocumentViewerProps) {
     mutationFn: () => projectApi.generateCodeChunks(projectId),
     onSuccess: async () => {
       setActionError('')
-      await queryClient.invalidateQueries({ queryKey: ['project-documents', projectId] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['project-code-chunks', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['project-documents', projectId] }),
+      ])
     },
     onError: (error) => {
       setActionError(getErrorMessage(error))
@@ -81,6 +96,14 @@ export function DocumentViewer({ projectId }: DocumentViewerProps) {
   })
 
   const isWorking = generateMutation.isPending || prepareMutation.isPending
+  const canPrepareDocs = hasScannedFiles && !isWorking
+  const canGenerateDocs = hasCodeChunks && !isWorking
+
+  const workflowNotice = !hasScannedFiles
+    ? '1단계: Clone and Scan을 먼저 실행하세요.'
+    : !hasCodeChunks
+      ? '2단계: Prepare Docs로 code chunks를 생성하세요.'
+      : '3단계: Generate로 Wiki 문서를 생성하세요.'
 
   useEffect(() => {
     if (!selectedDocumentId && selectedDocumentIdFromList) {
@@ -124,21 +147,38 @@ export function DocumentViewer({ projectId }: DocumentViewerProps) {
             </label>
             <button
               className="h-9 rounded-md border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
-              disabled={isWorking}
+              disabled={!canPrepareDocs}
               onClick={() => prepareMutation.mutate()}
               type="button"
+              title={
+                hasScannedFiles
+                  ? 'Generate code chunks from scanned files.'
+                  : 'Run Clone and Scan before Prepare Docs.'
+              }
             >
               {prepareMutation.isPending ? 'Preparing...' : 'Prepare Docs'}
             </button>
             <button
               className="h-9 rounded-md bg-slate-950 px-3 text-xs font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-              disabled={isWorking}
+              disabled={!canGenerateDocs}
               onClick={() => generateMutation.mutate()}
               type="button"
+              title={
+                hasCodeChunks
+                  ? 'Generate wiki documents from prepared chunks.'
+                  : 'Run Prepare Docs before Generate.'
+              }
             >
               {generateMutation.isPending ? 'Generating...' : 'Generate'}
             </button>
           </div>
+        </div>
+        <div className="mt-3 rounded-md bg-slate-50 p-3 text-xs leading-5 text-slate-600">
+          <p className="font-medium text-slate-700">{workflowNotice}</p>
+          <p className="mt-1">
+            Scan files: {hasScannedFiles ? 'ready' : 'missing'} · Code chunks:{' '}
+            {hasCodeChunks ? `${codeChunks.length} ready` : 'missing'}
+          </p>
         </div>
         {actionError ? (
           <p className="mt-3 text-sm text-red-600">{actionError}</p>
@@ -155,7 +195,7 @@ export function DocumentViewer({ projectId }: DocumentViewerProps) {
           ) : null}
           {!documentsQuery.isLoading && !documentsQuery.isError && visibleDocuments.length === 0 ? (
             <p className="text-sm leading-6 text-slate-500">
-              아직 생성된 문서가 없습니다. Prepare Docs 후 Generate를 실행하세요.
+              아직 생성된 문서가 없습니다. Clone and Scan, Prepare Docs, Generate 순서로 실행하세요.
             </p>
           ) : null}
           <div className="space-y-2">
@@ -192,7 +232,7 @@ export function DocumentViewer({ projectId }: DocumentViewerProps) {
           ) : null}
           {!selectedDocumentIdFromList && !documentsQuery.isLoading ? (
             <p className="text-sm text-slate-500">
-              아직 생성된 문서가 없습니다. Prepare Docs 후 Generate를 실행하세요.
+              분석 데이터가 부족합니다. 먼저 repository scan과 Prepare Docs(chunk generation)를 실행하세요.
             </p>
           ) : null}
           {documentQuery.data ? (

@@ -7,7 +7,7 @@ export function Header() {
           <p className="text-xs text-slate-500">Repository wiki and onboarding chat workspace</p>
         </div>
         <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-          Mock mode
+          Development mode
         </div>
       </div>
     </header>

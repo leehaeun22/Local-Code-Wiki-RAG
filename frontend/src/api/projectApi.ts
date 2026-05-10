@@ -5,7 +5,12 @@ import type {
   DocumentGenerationResult,
   ProjectDocument,
 } from '../types/document'
-import type { CodeChunkGenerationResult, FileTreeNode, RepositoryScanResult } from '../types/file'
+import type {
+  CodeChunk,
+  CodeChunkGenerationResult,
+  FileTreeNode,
+  RepositoryScanResult,
+} from '../types/file'
 import type {
   ApiResponse,
   Project,
@@ -69,6 +74,13 @@ export const projectApi = {
   async generateCodeChunks(projectId: string) {
     const { data } = await apiClient.post<ApiResponse<CodeChunkGenerationResult>>(
       `/api/v1/projects/${projectId}/chunks/generate`,
+    )
+    return data.data
+  },
+
+  async getCodeChunks(projectId: string) {
+    const { data } = await apiClient.get<ApiResponse<CodeChunk[]>>(
+      `/api/v1/projects/${projectId}/chunks`,
     )
     return data.data
   },

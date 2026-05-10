@@ -16,6 +16,10 @@ class CodeChunkGenerationError(Exception):
     pass
 
 
+REPOSITORY_NOT_CLONED_MESSAGE = "Repository is not cloned. Run clone before chunk generation."
+NO_SCANNED_FILES_MESSAGE = "No scanned files found. Run repository scan before chunk generation."
+
+
 def _create_chunking_task(db: Session, project_id: str) -> AnalysisTask:
     task = AnalysisTask(
         project_id=project_id,
@@ -59,12 +63,12 @@ def generate_code_chunks(
 
     try:
         if not project.local_path:
-            raise CodeChunkGenerationError("Project local_path is empty. Clone the repository first.")
+            raise CodeChunkGenerationError(REPOSITORY_NOT_CLONED_MESSAGE)
 
         root_path = Path(project.local_path)
 
         if not root_path.exists() or not root_path.is_dir():
-            raise CodeChunkGenerationError(f"Project local_path does not exist: {project.local_path}")
+            raise CodeChunkGenerationError(REPOSITORY_NOT_CLONED_MESSAGE)
 
         repository_files = list(
             db.scalars(
@@ -75,7 +79,7 @@ def generate_code_chunks(
         )
 
         if not repository_files:
-            raise CodeChunkGenerationError("No repository files found. Scan the repository first.")
+            raise CodeChunkGenerationError(NO_SCANNED_FILES_MESSAGE)
 
         db.execute(delete(CodeChunk).where(CodeChunk.project_id == project_id))
         generated_chunks: list[CodeChunk] = []

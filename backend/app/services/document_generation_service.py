@@ -15,7 +15,7 @@ class DocumentGenerationError(Exception):
 
 
 INSUFFICIENT_DATA_MESSAGE = (
-    "분석 데이터가 부족합니다. 먼저 repository scan과 Prepare Docs(chunk generation)를 실행하세요."
+    "No code chunks found. Run Prepare Docs before document generation."
 )
 DOCUMENT_TITLES: dict[str, str] = {
     "overview": "Project Overview",
@@ -49,7 +49,12 @@ def generate_documents(db: Session, project_id: str, payload: DocumentGenerateRe
         ).all(),
     )
 
-    if _has_insufficient_data(repository_files, code_chunks):
+    if not repository_files:
+        raise DocumentGenerationError(
+            "No scanned files found. Run repository scan before document generation.",
+        )
+
+    if not code_chunks:
         raise DocumentGenerationError(INSUFFICIENT_DATA_MESSAGE)
 
     commit = _find_commit(db, project_id, project.last_commit_hash)
@@ -126,13 +131,6 @@ def _find_commit(db: Session, project_id: str, commit_hash: str | None) -> Commi
             Commit.commit_hash == commit_hash,
         ),
     )
-
-
-def _has_insufficient_data(
-    repository_files: list[RepositoryFile],
-    code_chunks: list[CodeChunk],
-) -> bool:
-    return len(repository_files) < 1 or len(code_chunks) < 1
 
 
 def _generate_markdown_document(

@@ -18,3 +18,17 @@ export interface CodeChunkGenerationResult {
   generated_chunk_count: number
   task_id: string
 }
+
+export interface CodeChunk {
+  id: string
+  project_id: string
+  file_id: string
+  chunk_index: number
+  chunk_type: string
+  start_line: number
+  end_line: number
+  content: string
+  content_hash: string
+  created_at: string
+  updated_at: string
+}
