@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 
 import { projectApi } from '../../api/projectApi'
-import type { DocumentLanguage } from '../../types/document'
+import type { DocumentLanguage, ProjectDocument } from '../../types/document'
 
 interface DocumentViewerProps {
   disabled?: boolean
@@ -32,6 +32,10 @@ function getErrorMessage(error: unknown): string {
   return 'Request failed.'
 }
 
+function getDocumentId(document: ProjectDocument): string {
+  return document.id || document.document_id || ''
+}
+
 export function DocumentViewer({ disabled = false, projectId }: DocumentViewerProps) {
   const queryClient = useQueryClient()
   const [language, setLanguage] = useState<DocumentLanguage>('ko')
@@ -56,8 +60,13 @@ export function DocumentViewer({ disabled = false, projectId }: DocumentViewerPr
   const hasScannedFiles = fileTree.length > 0
   const hasCodeChunks = codeChunks.length > 0
   const visibleDocuments = documents.filter((document) => document.language === language)
-  const selectedDocumentIdFromList =
-    selectedDocumentId || visibleDocuments[0]?.id || ''
+  const selectedDocumentIdFromList = visibleDocuments.some(
+    (document) => getDocumentId(document) === selectedDocumentId,
+  )
+    ? selectedDocumentId
+    : visibleDocuments[0]
+      ? getDocumentId(visibleDocuments[0])
+      : ''
 
   const documentQuery = useQuery({
     queryKey: ['project-document', projectId, selectedDocumentIdFromList],
@@ -68,13 +77,14 @@ export function DocumentViewer({ disabled = false, projectId }: DocumentViewerPr
   const generateMutation = useMutation({
     mutationFn: () => projectApi.generateDocuments(projectId, { language }),
     onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ['project-analysis-status', projectId] })
       const documents = await queryClient.fetchQuery({
         queryKey: ['project-documents', projectId],
         queryFn: () => projectApi.getDocuments(projectId),
       })
       const firstDocument =
         documents.find((document) => document.language === language) ?? result.documents[0]
-      setSelectedDocumentId(firstDocument?.id ?? '')
+      setSelectedDocumentId(firstDocument ? getDocumentId(firstDocument) : '')
       setActionError('')
     },
     onError: (error) => {
@@ -87,6 +97,7 @@ export function DocumentViewer({ disabled = false, projectId }: DocumentViewerPr
     onSuccess: async () => {
       setActionError('')
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['project-analysis-status', projectId] }),
         queryClient.invalidateQueries({ queryKey: ['project-code-chunks', projectId] }),
         queryClient.invalidateQueries({ queryKey: ['project-documents', projectId] }),
       ])
@@ -114,12 +125,12 @@ export function DocumentViewer({ disabled = false, projectId }: DocumentViewerPr
 
   useEffect(() => {
     const selectedDocumentExists = documents.some(
-      (document) => document.language === language && document.id === selectedDocumentId,
+      (document) => document.language === language && getDocumentId(document) === selectedDocumentId,
     )
 
     if (selectedDocumentId && !selectedDocumentExists) {
       const firstVisibleDocument = documents.find((document) => document.language === language)
-      setSelectedDocumentId(firstVisibleDocument?.id ?? '')
+      setSelectedDocumentId(firstVisibleDocument ? getDocumentId(firstVisibleDocument) : '')
     }
   }, [documents, language, selectedDocumentId])
 
@@ -204,12 +215,12 @@ export function DocumentViewer({ disabled = false, projectId }: DocumentViewerPr
               <button
                 className={[
                   'w-full rounded-md px-3 py-2 text-left text-sm transition',
-                  selectedDocumentIdFromList === document.id
+                  selectedDocumentIdFromList === getDocumentId(document)
                     ? 'bg-sky-50 font-medium text-sky-800'
                     : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950',
                 ].join(' ')}
-                key={document.id}
-                onClick={() => setSelectedDocumentId(document.id)}
+                key={getDocumentId(document)}
+                onClick={() => setSelectedDocumentId(getDocumentId(document))}
                 type="button"
               >
                 <span className="block">{document.title}</span>
@@ -229,7 +240,11 @@ export function DocumentViewer({ disabled = false, projectId }: DocumentViewerPr
             <p className="text-sm text-slate-500">Loading document...</p>
           ) : null}
           {documentQuery.isError ? (
-            <p className="text-sm text-red-600">Failed to load selected document.</p>
+            <p className="text-sm text-red-600">
+              {axios.isAxiosError(documentQuery.error) && documentQuery.error.response?.status === 404
+                ? '문서를 찾을 수 없습니다. 문서를 다시 생성해 주세요.'
+                : 'Failed to load selected document.'}
+            </p>
           ) : null}
           {!selectedDocumentIdFromList && !documentsQuery.isLoading ? (
             <p className="text-sm text-slate-500">

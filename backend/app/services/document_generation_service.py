@@ -84,7 +84,7 @@ def generate_documents(db: Session, project_id: str, payload: DocumentGenerateRe
             generated_from_commit_hash=project.last_commit_hash,
             document_type=document_type,
             title=DOCUMENT_TITLES[document_type],
-            content=content,
+            content=_ensure_document_content(content, document_type, payload.language),
             language=payload.language,
         )
         db.add(document)
@@ -116,7 +116,18 @@ def get_document(db: Session, project_id: str, document_id: str) -> Document:
     )
 
     if document is None:
-        raise DocumentGenerationError("Document not found.")
+        raise DocumentGenerationError(
+            f"Document not found for this project. project_id={project_id}, document_id={document_id}",
+        )
+
+    if not document.content.strip():
+        document.content = _build_document_fallback_content(
+            title=document.title,
+            document_type=document.document_type,
+            language=document.language,
+        )
+        db.commit()
+        db.refresh(document)
 
     return document
 
@@ -130,6 +141,32 @@ def _find_commit(db: Session, project_id: str, commit_hash: str | None) -> Commi
             Commit.project_id == project_id,
             Commit.commit_hash == commit_hash,
         ),
+    )
+
+
+def _ensure_document_content(content: str | None, document_type: DocumentType, language: str) -> str:
+    normalized = (content or "").strip()
+
+    if normalized:
+        return normalized
+
+    return _build_document_fallback_content(DOCUMENT_TITLES[document_type], document_type, language)
+
+
+def _build_document_fallback_content(title: str, document_type: str, language: str) -> str:
+    if language == "ko":
+        return (
+            f"# {title}\n\n"
+            "문서 내용이 비어 있어 기본 fallback 문서를 표시합니다.\n\n"
+            f"- document_type: `{document_type}`\n"
+            "- 문서를 다시 생성해 주세요.\n"
+        )
+
+    return (
+        f"# {title}\n\n"
+        "Document content was empty, so a fallback document is being shown.\n\n"
+        f"- document_type: `{document_type}`\n"
+        "- Please regenerate the document.\n"
     )
 
 

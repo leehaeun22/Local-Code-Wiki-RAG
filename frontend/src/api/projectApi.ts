@@ -13,6 +13,7 @@ import type {
 } from '../types/file'
 import type {
   ApiResponse,
+  AnalysisStatus,
   Project,
   ProjectCloneResult,
   ProjectCreateRequest,
@@ -32,6 +33,13 @@ export const projectApi = {
 
   async getProject(projectId: string) {
     const { data } = await apiClient.get<ApiResponse<Project>>(`/api/v1/projects/${projectId}`)
+    return data.data
+  },
+
+  async getAnalysisStatus(projectId: string) {
+    const { data } = await apiClient.get<ApiResponse<AnalysisStatus>>(
+      `/api/v1/projects/${projectId}/analysis-status`,
+    )
     return data.data
   },
 

@@ -21,6 +21,7 @@ class ChatSessionRead(BaseModel):
 
 class ChatReferenceRead(BaseModel):
     id: str
+    reference_type: str
     file_id: str | None
     chunk_id: str | None
     document_id: str | None

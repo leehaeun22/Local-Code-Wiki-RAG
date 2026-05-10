@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import axios from 'axios'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 
 import { projectApi } from '../../api/projectApi'
 import type { AnswerLanguage, ChatMessage as ChatMessageType, ChatSession } from '../../types/chat'
@@ -46,6 +46,11 @@ export function ChatPanel({ projectId }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages)
   const [session, setSession] = useState<ChatSession | null>(null)
   const [errorMessage, setErrorMessage] = useState('')
+  const analysisStatusQuery = useQuery({
+    queryKey: ['project-analysis-status', projectId],
+    queryFn: () => projectApi.getAnalysisStatus(projectId),
+  })
+  const analysisStatus = analysisStatusQuery.data
 
   const chatMutation = useMutation({
     mutationFn: async (question: string) => {
@@ -112,6 +117,11 @@ export function ChatPanel({ projectId }: ChatPanelProps) {
       </div>
       <div className="flex h-[calc(100%-81px)] min-h-[520px] flex-col">
         <div className="flex-1 space-y-3 overflow-auto p-4">
+          {analysisStatus && !analysisStatus.has_chunks && !analysisStatus.has_documents ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              참고 근거가 없습니다. 먼저 scan/chunk/document generation을 실행하세요.
+            </div>
+          ) : null}
           {messages.map((message) => (
             <ChatMessage key={message.id} message={message} />
           ))}

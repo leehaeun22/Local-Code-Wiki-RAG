@@ -8,6 +8,7 @@ export type DocumentType =
 
 export interface ProjectDocument {
   id: string
+  document_id?: string
   project_id: string
   file_id: string | null
   generated_from_commit_id: string | null

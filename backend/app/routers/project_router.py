@@ -1,8 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.models.code_chunk import CodeChunk
+from app.models.document import Document
+from app.models.repository_file import RepositoryFile
 from app.schemas.code_chunk_schema import CodeChunkGenerationResult, CodeChunkRead
 from app.schemas.document_schema import (
     DocumentGenerateRequest,
@@ -18,6 +22,7 @@ from app.schemas.embedding_schema import (
 )
 from app.schemas.project_schema import (
     ApiResponse,
+    AnalysisStatusRead,
     DeleteProjectResult,
     ProjectCreate,
     ProjectCloneResult,
@@ -115,6 +120,40 @@ def get_project(project_id: str, db: Session = Depends(get_db)) -> ApiResponse[P
     try:
         project = project_service.get_project(db, project_id)
         return ApiResponse(data=_to_project_read(project))
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found.",
+        ) from exc
+
+
+@router.get("/{project_id}/analysis-status", response_model=ApiResponse[AnalysisStatusRead])
+def get_project_analysis_status(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> ApiResponse[AnalysisStatusRead]:
+    try:
+        project_service.get_project(db, project_id)
+        file_count = db.scalar(
+            select(func.count()).select_from(RepositoryFile).where(RepositoryFile.project_id == project_id),
+        ) or 0
+        chunk_count = db.scalar(
+            select(func.count()).select_from(CodeChunk).where(CodeChunk.project_id == project_id),
+        ) or 0
+        document_count = db.scalar(
+            select(func.count()).select_from(Document).where(Document.project_id == project_id),
+        ) or 0
+        return ApiResponse(
+            data=AnalysisStatusRead(
+                project_id=project_id,
+                file_count=file_count,
+                chunk_count=chunk_count,
+                document_count=document_count,
+                has_files=file_count > 0,
+                has_chunks=chunk_count > 0,
+                has_documents=document_count > 0,
+            ),
+        )
     except ProjectNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -69,3 +69,13 @@ class ProjectCloneResult(BaseModel):
     local_path: str
     commit_hash: str
     task_id: str
+
+
+class AnalysisStatusRead(BaseModel):
+    project_id: str
+    file_count: int
+    chunk_count: int
+    document_count: int
+    has_files: bool
+    has_chunks: bool
+    has_documents: bool

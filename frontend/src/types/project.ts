@@ -47,3 +47,13 @@ export interface ProjectCloneResult {
   commit_hash: string
   task_id: string
 }
+
+export interface AnalysisStatus {
+  project_id: string
+  file_count: number
+  chunk_count: number
+  document_count: number
+  has_files: boolean
+  has_chunks: boolean
+  has_documents: boolean
+}

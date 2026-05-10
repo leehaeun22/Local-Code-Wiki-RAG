@@ -1,17 +1,22 @@
+import logging
 import re
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
 from app.models.chat_message import ChatMessage
 from app.models.chat_session import ChatSession
+from app.models.code_chunk import CodeChunk
 from app.models.document import Document
 from app.models.message_reference import MessageReference
 from app.schemas.chat_schema import ChatRequest, ChatSessionCreate
-from app.services.embedding_service import EmbeddingGenerationError, search_project_chunks
-from app.services.project_service import ProjectNotFoundError, get_project
+from app.services.embedding_service import search_project_chunks
+from app.services.project_service import get_project
+
+
+logger = logging.getLogger(__name__)
 
 
 class RagChatError(Exception):
@@ -25,6 +30,8 @@ Rules:
 - Include relevant file paths and line numbers.
 - Do not force-translate technical terms.
 """
+
+NO_REFERENCES_MESSAGE = "참고 근거가 없습니다. 먼저 scan/chunk/document generation을 실행하세요."
 
 
 def create_chat_session(db: Session, project_id: str, payload: ChatSessionCreate) -> ChatSession:
@@ -68,25 +75,32 @@ def answer_chat(db: Session, project_id: str, payload: ChatRequest) -> tuple[Cha
     )
 
     try:
-        search_results = search_project_chunks(
+        code_chunk_count = _count_code_chunks(db, project_id)
+        document_count = _count_documents(db, project_id)
+        search_results = _resolve_context(
             db=db,
             project_id=project_id,
-            query=payload.question,
+            question=payload.question,
             top_k=payload.top_k,
+            code_chunk_count=code_chunk_count,
+            document_count=document_count,
         )
-        search_results = _with_document_results(
-            db=db,
-            project_id=project_id,
-            query=payload.question,
-            top_k=payload.top_k,
-            chunk_results=search_results,
+        logger.debug(
+            "RAG context resolved project_id=%s code_chunks=%s documents=%s selected_references=%s",
+            project_id,
+            code_chunk_count,
+            document_count,
+            len(search_results),
         )
+
         context = _build_context(search_results)
         answer = _generate_answer(
             question=payload.question,
             context=context,
             language=payload.language,
             search_results=search_results,
+            code_chunk_count=code_chunk_count,
+            document_count=document_count,
         )
 
         user_message = ChatMessage(
@@ -127,7 +141,7 @@ def answer_chat(db: Session, project_id: str, payload: ChatRequest) -> tuple[Cha
         session = _get_session(db, project_id, session.id)
 
         return session, user_message, assistant_message
-    except (EmbeddingGenerationError, RagChatError) as exc:
+    except RagChatError as exc:
         db.rollback()
         raise RagChatError(str(exc)) from exc
     except Exception as exc:
@@ -162,6 +176,44 @@ def _get_message(db: Session, message_id: str) -> ChatMessage:
     return message
 
 
+def _count_code_chunks(db: Session, project_id: str) -> int:
+    return db.scalar(
+        select(func.count()).select_from(CodeChunk).where(CodeChunk.project_id == project_id),
+    ) or 0
+
+
+def _count_documents(db: Session, project_id: str) -> int:
+    return db.scalar(
+        select(func.count()).select_from(Document).where(Document.project_id == project_id),
+    ) or 0
+
+
+def _resolve_context(
+    db: Session,
+    project_id: str,
+    question: str,
+    top_k: int,
+    code_chunk_count: int,
+    document_count: int,
+) -> list[dict[str, Any]]:
+    if code_chunk_count > 0:
+        chunk_results = search_project_chunks(
+            db=db,
+            project_id=project_id,
+            query=question,
+            top_k=top_k,
+        )
+        if chunk_results:
+            return chunk_results
+
+        return _fallback_code_chunk_context(db, project_id, question, top_k)
+
+    if document_count > 0:
+        return _fallback_document_context(db, project_id, question, top_k)
+
+    return []
+
+
 def _build_context(search_results: list[dict[str, Any]]) -> str:
     if not search_results:
         return "No context was retrieved."
@@ -186,9 +238,18 @@ def _generate_answer(
     context: str,
     language: str,
     search_results: list[dict[str, Any]],
+    code_chunk_count: int,
+    document_count: int,
 ) -> str:
+    if code_chunk_count == 0 and document_count == 0:
+        return NO_REFERENCES_MESSAGE
+
     if not settings.openai_api_key:
-        return _generate_local_answer(question=question, context=context, language=language, search_results=search_results)
+        return _generate_local_answer(
+            question=question,
+            language=language,
+            search_results=search_results,
+        )
 
     from openai import OpenAI
 
@@ -211,76 +272,96 @@ def _generate_answer(
     except Exception:
         pass
 
-    return _generate_local_answer(question=question, context=context, language=language, search_results=search_results)
+    return _generate_local_answer(
+        question=question,
+        language=language,
+        search_results=search_results,
+    )
 
 
 def _generate_local_answer(
     question: str,
-    context: str,
     language: str,
     search_results: list[dict[str, Any]],
 ) -> str:
-    del question, context
-
-    if language == "ko":
-        if not search_results:
-            return (
-                "저장된 code_chunks 또는 documents에서 관련 내용을 찾지 못했습니다. "
-                "먼저 scan, chunk generation, document generation을 실행한 뒤 다시 질문하세요."
-            )
-
-        lines = [
-            "OpenAI API 키가 없어 로컬 저장소 context만 사용해 답변합니다.",
-            "찾은 참고 근거:",
-        ]
-        lines.extend(f"- {_reference_summary(result)}" for result in search_results[:3])
-        lines.append("더 자세한 설명이 필요하면 OpenAI API 키와 ChromaDB를 설정한 뒤 다시 질문하세요.")
-        return "\n".join(lines)
-
     if not search_results:
-        return (
-            "I couldn't find relevant content in stored code chunks or documents. "
-            "Run scan, chunk generation, and document generation first, then ask again."
+        return NO_REFERENCES_MESSAGE if language == "ko" else (
+            "No references are available. Run scan, chunk generation, and document generation first."
         )
 
+    reference_summaries = [_reference_summary(result) for result in search_results[:3]]
+    evidence_lines = [_snippet(result["content"], max_length=220) for result in search_results[:2]]
+
+    if language == "ko":
+        lines = [
+            "프로젝트 요약:",
+            "이 답변은 저장된 code chunks 또는 documents를 기준으로 생성한 로컬 fallback 응답입니다.",
+            f"질문: {question}",
+            "",
+            "관련 근거:",
+        ]
+        lines.extend(f"- {summary}" for summary in reference_summaries)
+        lines.append("")
+        lines.append("질문과 관련 있어 보이는 내용:")
+        lines.extend(f"- {evidence}" for evidence in evidence_lines if evidence)
+        return "\n".join(lines)
+
     lines = [
-        "OpenAI API key is not configured, so this answer is based only on local repository context.",
-        "References found:",
+        "Project summary:",
+        "This is a local fallback answer generated from stored code chunks or documents.",
+        f"Question: {question}",
+        "",
+        "Relevant references:",
     ]
-    lines.extend(f"- {_reference_summary(result)}" for result in search_results[:3])
-    lines.append("For a fuller answer, configure an OpenAI API key and ChromaDB, then ask again.")
+    lines.extend(f"- {summary}" for summary in reference_summaries)
+    lines.append("")
+    lines.append("Potential evidence related to your question:")
+    lines.extend(f"- {evidence}" for evidence in evidence_lines if evidence)
     return "\n".join(lines)
 
 
-def _with_document_results(
+def _fallback_code_chunk_context(
     db: Session,
     project_id: str,
     query: str,
     top_k: int,
-    chunk_results: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    if len(chunk_results) >= top_k:
-        return chunk_results[:top_k]
+    chunks = list(
+        db.scalars(
+            select(CodeChunk)
+            .options(selectinload(CodeChunk.file))
+            .where(CodeChunk.project_id == project_id)
+            .order_by(CodeChunk.created_at.desc()),
+        ).all(),
+    )
+    ranked = sorted(
+        chunks,
+        key=lambda chunk: (_score_text_for_query(query, f"{chunk.file.file_path}\n{chunk.content}"), chunk.created_at),
+        reverse=True,
+    )
+    chosen = ranked[:top_k] if ranked else []
 
-    document_results = _fallback_search_project_documents(db, project_id, query, top_k)
-    combined = [*chunk_results]
-    existing_document_ids = {result.get("document_id") for result in combined if result.get("document_id")}
+    if chosen and _score_text_for_query(query, f"{chosen[0].file.file_path}\n{chosen[0].content}") <= 0:
+        chosen = chunks[:top_k]
 
-    for result in document_results:
-        document_id = result.get("document_id")
+    return [
+        {
+            "reference_type": "code_chunk",
+            "chunk_id": chunk.id,
+            "document_id": None,
+            "file_id": chunk.file_id,
+            "file_path": chunk.file.file_path,
+            "start_line": chunk.start_line,
+            "end_line": chunk.end_line,
+            "content": chunk.content,
+            "distance": None,
+            "metadata": {"file_path": chunk.file.file_path},
+        }
+        for chunk in chosen
+    ]
 
-        if document_id in existing_document_ids:
-            continue
 
-        combined.append(result)
-
-        if len(combined) >= top_k:
-            break
-
-    return combined
-
-
-def _fallback_search_project_documents(
+def _fallback_document_context(
     db: Session,
     project_id: str,
     query: str,
@@ -293,34 +374,31 @@ def _fallback_search_project_documents(
             .order_by(Document.updated_at.desc()),
         ).all(),
     )
-    ranked_documents = sorted(
+    ranked = sorted(
         documents,
         key=lambda document: (_score_text_for_query(query, f"{document.title}\n{document.content}"), document.updated_at),
         reverse=True,
     )
-    results: list[dict[str, Any]] = []
+    chosen = ranked[:top_k] if ranked else []
 
-    for document in ranked_documents[:top_k]:
-        score = _score_text_for_query(query, f"{document.title}\n{document.content}")
+    if chosen and _score_text_for_query(query, f"{chosen[0].title}\n{chosen[0].content}") <= 0:
+        chosen = documents[:top_k]
 
-        if score <= 0:
-            continue
-
-        results.append(
-            {
-                "chunk_id": None,
-                "document_id": document.id,
-                "file_id": document.file_id,
-                "file_path": f"documents/{document.document_type}.{document.language}.md",
-                "start_line": None,
-                "end_line": None,
-                "content": document.content,
-                "distance": 1 / (1 + score),
-                "metadata": {"document_type": document.document_type, "title": document.title},
-            },
-        )
-
-    return results
+    return [
+        {
+            "reference_type": "document",
+            "chunk_id": None,
+            "document_id": document.id,
+            "file_id": document.file_id,
+            "file_path": f"documents/{document.document_type}.{document.language}.md",
+            "start_line": None,
+            "end_line": None,
+            "content": document.content,
+            "distance": None,
+            "metadata": {"document_type": document.document_type, "title": document.title},
+        }
+        for document in chosen
+    ]
 
 
 def _score_text_for_query(query: str, text: str) -> float:
@@ -346,9 +424,9 @@ def _reference_summary(result: dict[str, Any]) -> str:
     file_path = result.get("file_path") or "Generated document"
     start_line = result.get("start_line")
     end_line = result.get("end_line")
+    metadata = result.get("metadata") or {}
 
-    if start_line is None or end_line is None:
-        metadata = result.get("metadata") or {}
+    if result.get("reference_type") == "document" or (start_line is None or end_line is None):
         title = metadata.get("title")
         return f"{file_path} ({title})" if title else file_path
 
@@ -356,7 +434,7 @@ def _reference_summary(result: dict[str, Any]) -> str:
 
 
 def _snippet(content: str, max_length: int = 500) -> str:
-    normalized = content.strip()
+    normalized = " ".join(content.strip().split())
     return normalized[:max_length]
 
 

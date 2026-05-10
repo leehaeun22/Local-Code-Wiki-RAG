@@ -25,3 +25,13 @@ class MessageReference(UUIDTimestampMixin, Base):
     file: Mapped["RepositoryFile | None"] = relationship(back_populates="message_references")
     chunk: Mapped["CodeChunk | None"] = relationship(back_populates="message_references")
     document: Mapped["Document | None"] = relationship(back_populates="message_references")
+
+    @property
+    def reference_type(self) -> str:
+        if self.chunk_id:
+            return "code_chunk"
+
+        if self.document_id:
+            return "document"
+
+        return "unknown"

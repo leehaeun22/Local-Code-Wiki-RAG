@@ -116,6 +116,7 @@ export function FileTree({ disabled = false, projectId, projectLocalPath }: File
   const refreshProjectData = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['project', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['project-analysis-status', projectId] }),
       queryClient.invalidateQueries({ queryKey: ['project-file-tree', projectId] }),
       queryClient.invalidateQueries({ queryKey: ['project-code-chunks', projectId] }),
       queryClient.invalidateQueries({ queryKey: ['project-documents', projectId] }),

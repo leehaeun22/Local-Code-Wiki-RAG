@@ -4,6 +4,7 @@ export type AnswerLanguage = 'ko' | 'en'
 
 export interface ChatReference {
   id?: string
+  reference_type?: 'code_chunk' | 'document' | 'unknown'
   file_id?: string | null
   chunk_id?: string | null
   document_id?: string | null
