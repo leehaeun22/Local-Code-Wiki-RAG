@@ -144,8 +144,8 @@ def clone_project_repository(
         ) from exc
     except RepositoryCloneError as exc:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to clone repository.",
+            status_code=exc.status_code,
+            detail=exc.detail,
         ) from exc
     except SQLAlchemyError as exc:
         db.rollback()

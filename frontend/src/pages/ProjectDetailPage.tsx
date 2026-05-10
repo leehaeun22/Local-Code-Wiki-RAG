@@ -95,7 +95,13 @@ export function ProjectDetailPage() {
     },
     onError: (error) => {
       if (error instanceof AnalysisPipelineError) {
-        setAnalysisError(`${ANALYSIS_STEP_NAMES[error.step]} 실패: ${error.message}`)
+        const repositoryHint =
+          error.step === 'clone' && project?.repository_url
+            ? ` (URL: ${project.repository_url})`
+            : ''
+        setAnalysisError(
+          `${ANALYSIS_STEP_NAMES[error.step]} 실패${repositoryHint}: ${error.message}`,
+        )
         return
       }
 

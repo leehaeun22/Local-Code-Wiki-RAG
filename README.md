@@ -69,7 +69,26 @@ This project aims to reduce onboarding time by turning repository source code in
 
 ## Getting Started
 
-TODO
+Backend:
+
+```powershell
+cd backend
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8888
+```
+
+Frontend:
+
+```powershell
+cd frontend
+$env:VITE_API_BASE_URL="http://127.0.0.1:8888"
+npm run dev
+```
+
+Swagger:
+
+```text
+http://127.0.0.1:8888/docs
+```
 
 ## Docker Compose
 
