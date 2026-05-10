@@ -1,8 +1,11 @@
 from datetime import datetime, timezone
 import logging
+import os
 from pathlib import Path
 import re
 import shutil
+import stat
+from typing import Callable
 
 from git import Repo
 from git.exc import GitCommandError
@@ -79,6 +82,66 @@ def _validate_repository_url(repository_url: str | None) -> str:
     return normalized
 
 
+def _is_within_repository_storage(path: Path) -> bool:
+    try:
+        path.resolve().relative_to(REPOSITORY_STORAGE_ROOT.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _handle_remove_readonly(
+    func: Callable[[str], None],
+    path: str,
+    exc_info,
+) -> None:
+    exc = exc_info[1]
+
+    if isinstance(exc, PermissionError):
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+        return
+
+    raise exc
+
+
+def _remove_existing_clone_path(clone_path: Path) -> None:
+    if not clone_path.exists():
+        return
+
+    if not _is_within_repository_storage(clone_path):
+        raise RepositoryCloneError(
+            (
+                f"Repository delete failed for path '{clone_path}'. Refusing to delete a path "
+                "outside backend storage/repos."
+            ),
+        )
+
+    try:
+        shutil.rmtree(clone_path, onerror=_handle_remove_readonly)
+    except Exception as exc:
+        detail = (
+            f"Repository delete failed for path '{clone_path}'. {exc}. "
+            "Close any process using this repository and try again."
+        )
+        logger.exception(
+            "Repository cleanup failed for clone_path=%s",
+            clone_path,
+        )
+        raise RepositoryCloneError(detail) from exc
+
+    if clone_path.exists():
+        detail = (
+            f"Repository delete failed for path '{clone_path}'. Directory still exists after cleanup. "
+            "Close any process using this repository and try again."
+        )
+        logger.error(
+            "Repository cleanup incomplete for clone_path=%s",
+            clone_path,
+        )
+        raise RepositoryCloneError(detail)
+
+
 def clone_repository(db: Session, project_id: str) -> tuple[Project, AnalysisTask, Commit]:
     try:
         project = get_project(db, project_id)
@@ -92,8 +155,7 @@ def clone_repository(db: Session, project_id: str) -> tuple[Project, AnalysisTas
         repository_url = _validate_repository_url(project.repository_url)
 
         # TODO: Add access token based clone support for private GitHub repositories.
-        if clone_path.exists():
-            shutil.rmtree(clone_path)
+        _remove_existing_clone_path(clone_path)
 
         REPOSITORY_STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
 
@@ -138,7 +200,7 @@ def clone_repository(db: Session, project_id: str) -> tuple[Project, AnalysisTas
             exc.detail,
         )
         raise
-    except (GitCommandError, OSError) as exc:
+    except GitCommandError as exc:
         db.rollback()
         task = db.get(AnalysisTask, task.id)
         detail = (
@@ -154,6 +216,27 @@ def clone_repository(db: Session, project_id: str) -> tuple[Project, AnalysisTas
 
         logger.exception(
             "Repository clone failed for project_id=%s repository_url=%s clone_path=%s",
+            project_id,
+            project.repository_url,
+            clone_path,
+        )
+        raise RepositoryCloneError(detail) from exc
+    except OSError as exc:
+        db.rollback()
+        task = db.get(AnalysisTask, task.id)
+        detail = (
+            f"Repository clone failed for URL '{project.repository_url}'. {exc}. "
+            "Check that the repository URL is public and valid."
+        )
+
+        if task is not None:
+            task.status = "failed"
+            task.progress = 0
+            task.error_message = detail
+            db.commit()
+
+        logger.exception(
+            "Repository clone OS failure for project_id=%s repository_url=%s clone_path=%s",
             project_id,
             project.repository_url,
             clone_path,
