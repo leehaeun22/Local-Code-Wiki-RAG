@@ -72,6 +72,7 @@ function FileTreeItem({
 }
 
 interface FileTreeProps {
+  disabled?: boolean
   projectId: string
   projectLocalPath?: string | null
 }
@@ -97,7 +98,7 @@ function getErrorMessage(error: unknown): string {
   return 'Request failed.'
 }
 
-export function FileTree({ projectId, projectLocalPath }: FileTreeProps) {
+export function FileTree({ disabled = false, projectId, projectLocalPath }: FileTreeProps) {
   const queryClient = useQueryClient()
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
   const [selectedPath, setSelectedPath] = useState('')
@@ -158,7 +159,7 @@ export function FileTree({ projectId, projectLocalPath }: FileTreeProps) {
   })
 
   const isWorking =
-    cloneMutation.isPending || scanMutation.isPending || cloneAndScanMutation.isPending
+    disabled || cloneMutation.isPending || scanMutation.isPending || cloneAndScanMutation.isPending
 
   const toggleDirectory = (nodePath: string) => {
     setExpandedIds((current) => {

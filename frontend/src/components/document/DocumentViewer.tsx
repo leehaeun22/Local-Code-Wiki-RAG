@@ -7,6 +7,7 @@ import { projectApi } from '../../api/projectApi'
 import type { DocumentLanguage } from '../../types/document'
 
 interface DocumentViewerProps {
+  disabled?: boolean
   projectId: string
 }
 
@@ -31,7 +32,7 @@ function getErrorMessage(error: unknown): string {
   return 'Request failed.'
 }
 
-export function DocumentViewer({ projectId }: DocumentViewerProps) {
+export function DocumentViewer({ disabled = false, projectId }: DocumentViewerProps) {
   const queryClient = useQueryClient()
   const [language, setLanguage] = useState<DocumentLanguage>('ko')
   const [selectedDocumentId, setSelectedDocumentId] = useState('')
@@ -95,7 +96,7 @@ export function DocumentViewer({ projectId }: DocumentViewerProps) {
     },
   })
 
-  const isWorking = generateMutation.isPending || prepareMutation.isPending
+  const isWorking = disabled || generateMutation.isPending || prepareMutation.isPending
   const canPrepareDocs = hasScannedFiles && !isWorking
   const canGenerateDocs = hasCodeChunks && !isWorking
 
