@@ -55,7 +55,7 @@ const markdownComponents = {
       return (
         <code
           {...props}
-          className="block whitespace-pre-wrap bg-transparent px-0 py-0 font-mono text-[13px] leading-6 text-slate-100"
+          className="block whitespace-pre bg-transparent p-0 font-mono text-[12px] leading-5 text-slate-100"
         >
           {children}
         </code>
@@ -75,12 +75,220 @@ const markdownComponents = {
     return (
       <pre
         {...props}
-        className="overflow-x-auto rounded-xl bg-slate-950 p-4 font-mono text-[13px] leading-6 text-slate-100 shadow-inner"
+        className="my-4 max-h-[420px] overflow-auto rounded-xl bg-slate-950 p-4 font-mono text-[12px] leading-5 text-slate-100 shadow-inner"
       >
         {children}
       </pre>
     )
   },
+}
+
+interface CodeEvidenceCard {
+  id: string
+  filePath: string
+  startLine: string
+  endLine: string
+  language: string
+  description: string
+  code: string
+}
+
+const CODE_CHUNK_DISPLAY_LINE_LIMIT = 60
+const CODE_CHUNK_SECTION_PATTERN = /^(##)\s+(.+)$/gm
+
+function isCodeChunkHeading(heading: string): boolean {
+  return (
+    /주요\s*코드\s*청크/.test(heading) ||
+    /representative\s+code\s+chunks/i.test(heading) ||
+    /code\s+evidence/i.test(heading) ||
+    /肄붾뱶|泥\?겕/.test(heading)
+  )
+}
+
+function extractValue(text: string, labels: string[]): string {
+  for (const label of labels) {
+    const pattern = new RegExp(`(?:^|\\n)\\s*(?:[-*]\\s*)?${label}\\s*[:：]\\s*\\\`?([^\\n\\\`]+)\\\`?`, 'i')
+    const match = text.match(pattern)
+
+    if (match?.[1]?.trim()) {
+      return match[1].trim()
+    }
+  }
+
+  return ''
+}
+
+function parseLineRange(value: string): { startLine: string; endLine: string } {
+  const match = value.match(/(\d+)\s*[-~:]\s*(\d+)/)
+
+  if (!match) {
+    return { startLine: '', endLine: '' }
+  }
+
+  return { startLine: match[1], endLine: match[2] }
+}
+
+function parseCodeEvidenceCards(section: string): CodeEvidenceCard[] {
+  const cards: CodeEvidenceCard[] = []
+  const fencePattern = /```([^\n`]*)\n([\s\S]*?)```/g
+  let previousFenceEnd = 0
+  let match: RegExpExecArray | null
+
+  while ((match = fencePattern.exec(section)) !== null) {
+    const metadata = section.slice(previousFenceEnd, match.index)
+    const fenceLanguage = match[1].trim()
+    const code = match[2].replace(/\n+$/, '')
+
+    if (!code.trim()) {
+      previousFenceEnd = fencePattern.lastIndex
+      continue
+    }
+
+    const heading = Array.from(metadata.matchAll(/^###\s+(.+)$/gm)).at(-1)?.[1]?.trim() ?? ''
+    const headingLocation = heading.match(/^(.+):(\d+)-(\d+)$/)
+    const filePath =
+      extractValue(metadata, ['file_path', 'file', '파일']) || headingLocation?.[1]?.trim() || 'unknown'
+    const explicitRange = parseLineRange(
+      extractValue(metadata, ['line_range', 'lines', 'line', '라인', '라인 범위']),
+    )
+    const startLine = explicitRange.startLine || headingLocation?.[2] || '?'
+    const endLine = explicitRange.endLine || headingLocation?.[3] || '?'
+    const language = extractValue(metadata, ['language', '언어']) || fenceLanguage || 'text'
+    const description =
+      extractValue(metadata, ['summary', 'description', '설명']) ||
+      `${filePath} ${startLine}-${endLine} 코드 근거입니다.`
+
+    cards.push({
+      id: `${filePath}:${startLine}-${endLine}:${cards.length}`,
+      filePath,
+      startLine,
+      endLine,
+      language,
+      description,
+      code,
+    })
+    previousFenceEnd = fencePattern.lastIndex
+  }
+
+  return cards
+}
+
+function splitDocumentContent(content: string): {
+  markdown: string
+  codeEvidenceCards: CodeEvidenceCard[]
+} {
+  const headings = Array.from(content.matchAll(CODE_CHUNK_SECTION_PATTERN))
+  const codeChunkHeading = headings.find((match) => isCodeChunkHeading(match[2]))
+
+  if (!codeChunkHeading || codeChunkHeading.index === undefined) {
+    return { markdown: content, codeEvidenceCards: [] }
+  }
+
+  const sectionStart = codeChunkHeading.index
+  const nextHeading = headings.find(
+    (match) => match.index !== undefined && match.index > sectionStart,
+  )
+  const sectionEnd = nextHeading?.index ?? content.length
+  const section = content.slice(sectionStart, sectionEnd)
+  const cards = parseCodeEvidenceCards(section)
+
+  if (cards.length === 0) {
+    return { markdown: content, codeEvidenceCards: [] }
+  }
+
+  return {
+    markdown: `${content.slice(0, sectionStart).trimEnd()}\n\n${content.slice(sectionEnd).trimStart()}`.trim(),
+    codeEvidenceCards: cards,
+  }
+}
+
+function getVisibleCode(code: string): { visibleCode: string; hiddenLineCount: number } {
+  const lines = code.replace(/\r\n/g, '\n').split('\n')
+
+  if (lines.length <= CODE_CHUNK_DISPLAY_LINE_LIMIT) {
+    return { visibleCode: code, hiddenLineCount: 0 }
+  }
+
+  return {
+    visibleCode: lines.slice(0, CODE_CHUNK_DISPLAY_LINE_LIMIT).join('\n'),
+    hiddenLineCount: lines.length - CODE_CHUNK_DISPLAY_LINE_LIMIT,
+  }
+}
+
+function CodeEvidenceCards({ cards }: { cards: CodeEvidenceCard[] }) {
+  const [openCards, setOpenCards] = useState<Record<string, boolean>>({})
+
+  if (cards.length === 0) {
+    return null
+  }
+
+  return (
+    <section className="mt-8 border-t border-slate-200 pt-6">
+      <div className="mb-4">
+        <h2 className="text-xl font-semibold text-slate-950">주요 코드 청크</h2>
+        <p className="mt-1 text-sm leading-6 text-slate-500">
+          문서 내용을 뒷받침하는 코드 근거입니다. 전문은 필요할 때만 펼쳐서 확인할 수 있습니다.
+        </p>
+      </div>
+      <div className="space-y-3">
+        {cards.map((card, index) => {
+          const isOpen = Boolean(openCards[card.id])
+          const { visibleCode, hiddenLineCount } = getVisibleCode(card.code)
+
+          return (
+            <article
+              className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm"
+              key={card.id}
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    코드 근거 {index + 1}
+                  </p>
+                  <p className="mt-1 break-all font-mono text-sm font-semibold text-slate-900">
+                    {card.filePath}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600">
+                    <span className="rounded-full bg-white px-2 py-1 ring-1 ring-slate-200">
+                      라인 {card.startLine}-{card.endLine}
+                    </span>
+                    <span className="rounded-full bg-white px-2 py-1 ring-1 ring-slate-200">
+                      {card.language}
+                    </span>
+                  </div>
+                  <p className="mt-3 text-sm leading-6 text-slate-600">{card.description}</p>
+                </div>
+                <button
+                  className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-100"
+                  onClick={() =>
+                    setOpenCards((current) => ({ ...current, [card.id]: !current[card.id] }))
+                  }
+                  type="button"
+                >
+                  {isOpen ? '코드 닫기' : '코드 보기'}
+                </button>
+              </div>
+              {isOpen ? (
+                <div className="mt-4">
+                  <pre className="max-h-[420px] overflow-auto rounded-xl bg-slate-950 p-4 shadow-inner">
+                    <code className="block whitespace-pre bg-transparent p-0 font-mono text-[12px] leading-5 text-slate-100">
+                      {visibleCode}
+                    </code>
+                  </pre>
+                  {hiddenLineCount > 0 ? (
+                    <p className="mt-2 text-xs text-amber-700">
+                      일부만 표시됨: 처음 {CODE_CHUNK_DISPLAY_LINE_LIMIT}줄만 표시하고 나머지{' '}
+                      {hiddenLineCount}줄은 생략했습니다.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </article>
+          )
+        })}
+      </div>
+    </section>
+  )
 }
 
 export function DocumentViewer({ disabled = false, projectId }: DocumentViewerProps) {
@@ -131,6 +339,9 @@ export function DocumentViewer({ disabled = false, projectId }: DocumentViewerPr
     enabled: visibleDocuments.length > 0 && isSelectedIdValid,
     retry: false,
   })
+  const renderedDocument = documentQuery.data
+    ? splitDocumentContent(documentQuery.data.content)
+    : { markdown: '', codeEvidenceCards: [] }
 
   const generateMutation = useMutation({
     mutationFn: () => projectApi.generateDocuments(projectId, { language }),
@@ -345,7 +556,8 @@ export function DocumentViewer({ disabled = false, projectId }: DocumentViewerPr
           ) : null}
           {documentQuery.data ? (
             <div className="max-w-none space-y-4 text-sm leading-7 text-slate-700 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:text-slate-950 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-slate-950 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-slate-950 [&_li]:ml-5 [&_li]:list-disc">
-              <ReactMarkdown components={markdownComponents}>{documentQuery.data.content}</ReactMarkdown>
+              <ReactMarkdown components={markdownComponents}>{renderedDocument.markdown}</ReactMarkdown>
+              <CodeEvidenceCards cards={renderedDocument.codeEvidenceCards} />
             </div>
           ) : null}
         </div>

@@ -31,6 +31,8 @@ DOCUMENT_TITLES: dict[str, str] = {
 }
 CODE_FENCE = "`" * 3
 PLACEHOLDER_BLOCK_PATTERN = re.compile(r"^[\s\u2580-\u259F\u2800-\u28FF\u2500-\u257F_\-=~|]+$")
+LOCAL_SNIPPET_MAX_LINES = 60
+CONTEXT_SNIPPET_MAX_LINES = 40
 
 
 def generate_documents(db: Session, project_id: str, payload: DocumentGenerateRequest) -> list[Document]:
@@ -214,6 +216,11 @@ def _generate_markdown_document(
                         "You generate markdown documentation from analyzed repository files and "
                         "code chunks. Use only the provided context. If the context is insufficient, "
                         f"return exactly: {INSUFFICIENT_DATA_MESSAGE}. "
+                        "Keep the wiki narrative focused on summaries and explanations. "
+                        "For code evidence, include file_path, line range, language, and a short "
+                        "summary before any fenced snippet. Do not dump full raw chunks; snippets "
+                        "must stay under 60 lines and must not include placeholder or skeleton block "
+                        "characters. "
                         f"{language_instruction}"
                     ),
                 },
@@ -261,16 +268,22 @@ def _generate_local_markdown_document(
     ]
     chunk_lines = []
     for chunk in code_chunks:
-        snippet = _build_code_snippet(chunk.content)
+        snippet = _build_code_snippet(chunk.content, max_lines=LOCAL_SNIPPET_MAX_LINES)
 
         if not snippet:
             continue
 
+        language_name = _get_chunk_language(chunk)
+        summary = _build_chunk_summary(chunk, language)
         chunk_lines.append(
             "\n".join(
                 [
-                    f"### {chunk.file.file_path}:{chunk.start_line}-{chunk.end_line}",
-                    CODE_FENCE,
+                    f"### Code Evidence {len(chunk_lines) + 1}",
+                    f"- file_path: `{chunk.file.file_path}`",
+                    f"- line_range: `{chunk.start_line}-{chunk.end_line}`",
+                    f"- language: `{language_name}`",
+                    f"- summary: {summary}",
+                    f"{CODE_FENCE}{language_name}",
                     snippet,
                     CODE_FENCE,
                 ],
@@ -318,7 +331,11 @@ def _build_document_context(
     ]
     chunk_lines = []
     for chunk in code_chunks:
-        snippet = _build_code_snippet(chunk.content, max_length=2000)
+        snippet = _build_code_snippet(
+            chunk.content,
+            max_length=2000,
+            max_lines=CONTEXT_SNIPPET_MAX_LINES,
+        )
 
         if not snippet:
             continue
@@ -328,6 +345,8 @@ def _build_document_context(
                 [
                     f"File: {chunk.file.file_path}",
                     f"Lines: {chunk.start_line}-{chunk.end_line}",
+                    f"Language: {_get_chunk_language(chunk)}",
+                    f"Summary: {_build_chunk_summary(chunk, 'en')}",
                     f"Content:\n{snippet}",
                 ],
             ),
@@ -346,7 +365,25 @@ def _build_document_context(
     )
 
 
-def _build_code_snippet(content: str | None, max_length: int = 1200) -> str:
+def _get_chunk_language(chunk: CodeChunk) -> str:
+    return (chunk.file.language if chunk.file else None) or "text"
+
+
+def _build_chunk_summary(chunk: CodeChunk, language: str) -> str:
+    file_path = chunk.file.file_path if chunk.file else "unknown"
+    line_range = f"{chunk.start_line}-{chunk.end_line}"
+
+    if language == "ko":
+        return f"{file_path}의 {line_range} 라인에 있는 핵심 구현 근거입니다."
+
+    return f"Key implementation evidence from {file_path} lines {line_range}."
+
+
+def _build_code_snippet(
+    content: str | None,
+    max_length: int = 1200,
+    max_lines: int = LOCAL_SNIPPET_MAX_LINES,
+) -> str:
     normalized = (content or "").replace("\r\n", "\n").strip()
 
     if not normalized:
@@ -362,4 +399,14 @@ def _build_code_snippet(content: str | None, max_length: int = 1200) -> str:
     if PLACEHOLDER_BLOCK_PATTERN.fullmatch(visible_text):
         return ""
 
-    return normalized[:max_length].rstrip()
+    meaningful_lines = [
+        line.rstrip()
+        for line in normalized.split("\n")
+        if line.strip() and not PLACEHOLDER_BLOCK_PATTERN.fullmatch(line.strip())
+    ]
+
+    if not meaningful_lines:
+        return ""
+
+    shortened = "\n".join(meaningful_lines[:max_lines])
+    return shortened[:max_length].rstrip()
