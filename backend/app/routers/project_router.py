@@ -444,7 +444,11 @@ def get_project_document(
     except DocumentGenerationError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(exc),
+            detail={
+                "project_id": project_id,
+                "document_id": document_id,
+                "message": str(exc),
+            },
         ) from exc
 
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ComponentPropsWithoutRef } from 'react'
 import axios from 'axios'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
@@ -36,11 +36,59 @@ function getDocumentId(document: ProjectDocument): string {
   return document.id || document.document_id || ''
 }
 
+function isRealDocumentId(documentId: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    documentId,
+  )
+}
+
+function getRealDocumentId(document: ProjectDocument): string {
+  const documentId = getDocumentId(document)
+  return isRealDocumentId(documentId) ? documentId : ''
+}
+
+const markdownComponents = {
+  code({ className, children, ...props }: ComponentPropsWithoutRef<'code'>) {
+    const isBlock = Boolean(className)
+
+    if (isBlock) {
+      return (
+        <code
+          {...props}
+          className="block whitespace-pre-wrap bg-transparent px-0 py-0 font-mono text-[13px] leading-6 text-slate-100"
+        >
+          {children}
+        </code>
+      )
+    }
+
+    return (
+      <code
+        {...props}
+        className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[13px] text-slate-800"
+      >
+        {children}
+      </code>
+    )
+  },
+  pre({ children, ...props }: ComponentPropsWithoutRef<'pre'>) {
+    return (
+      <pre
+        {...props}
+        className="overflow-x-auto rounded-xl bg-slate-950 p-4 font-mono text-[13px] leading-6 text-slate-100 shadow-inner"
+      >
+        {children}
+      </pre>
+    )
+  },
+}
+
 export function DocumentViewer({ disabled = false, projectId }: DocumentViewerProps) {
   const queryClient = useQueryClient()
   const [language, setLanguage] = useState<DocumentLanguage>('ko')
   const [selectedDocumentId, setSelectedDocumentId] = useState('')
   const [actionError, setActionError] = useState('')
+  const [missingDocumentMessage, setMissingDocumentMessage] = useState('')
 
   const documentsQuery = useQuery({
     queryKey: ['project-documents', projectId],
@@ -54,38 +102,53 @@ export function DocumentViewer({ disabled = false, projectId }: DocumentViewerPr
     queryKey: ['project-code-chunks', projectId],
     queryFn: () => projectApi.getCodeChunks(projectId),
   })
+
   const documents = documentsQuery.data ?? []
   const fileTree = fileTreeQuery.data ?? []
   const codeChunks = codeChunksQuery.data ?? []
   const hasScannedFiles = fileTree.length > 0
   const hasCodeChunks = codeChunks.length > 0
-  const visibleDocuments = documents.filter((document) => document.language === language)
-  const selectedDocumentIdFromList = visibleDocuments.some(
-    (document) => getDocumentId(document) === selectedDocumentId,
+  const visibleDocuments = documents.filter(
+    (document) => document.language === language && Boolean(getRealDocumentId(document)),
   )
-    ? selectedDocumentId
-    : visibleDocuments[0]
-      ? getDocumentId(visibleDocuments[0])
-      : ''
+  const documentIds = visibleDocuments.map((document) => getRealDocumentId(document))
+  const isSelectedIdValid =
+    Boolean(selectedDocumentId) &&
+    isRealDocumentId(selectedDocumentId) &&
+    documentIds.includes(selectedDocumentId)
+  const selectedDocumentIdFromList = isSelectedIdValid ? selectedDocumentId : ''
 
   const documentQuery = useQuery({
     queryKey: ['project-document', projectId, selectedDocumentIdFromList],
-    queryFn: () => projectApi.getDocument(projectId, selectedDocumentIdFromList),
-    enabled: Boolean(selectedDocumentIdFromList),
+    queryFn: async () => {
+      console.debug('DocumentViewer detail request', {
+        selectedDocumentId,
+        documentIds,
+        isSelectedIdValid,
+      })
+      return projectApi.getDocument(projectId, selectedDocumentIdFromList)
+    },
+    enabled: visibleDocuments.length > 0 && isSelectedIdValid,
+    retry: false,
   })
 
   const generateMutation = useMutation({
     mutationFn: () => projectApi.generateDocuments(projectId, { language }),
-    onSuccess: async (result) => {
+    onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['project-analysis-status', projectId] })
-      const documents = await queryClient.fetchQuery({
+      const refreshedDocuments = await queryClient.fetchQuery({
         queryKey: ['project-documents', projectId],
         queryFn: () => projectApi.getDocuments(projectId),
       })
-      const firstDocument =
-        documents.find((document) => document.language === language) ?? result.documents[0]
-      setSelectedDocumentId(firstDocument ? getDocumentId(firstDocument) : '')
+      const firstDocumentId =
+        refreshedDocuments
+          .filter((document) => document.language === language)
+          .map((document) => getRealDocumentId(document))
+          .find(Boolean) ?? ''
+
+      setSelectedDocumentId(firstDocumentId)
       setActionError('')
+      setMissingDocumentMessage('')
     },
     onError: (error) => {
       setActionError(getErrorMessage(error))
@@ -96,6 +159,7 @@ export function DocumentViewer({ disabled = false, projectId }: DocumentViewerPr
     mutationFn: () => projectApi.generateCodeChunks(projectId),
     onSuccess: async () => {
       setActionError('')
+      setMissingDocumentMessage('')
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['project-analysis-status', projectId] }),
         queryClient.invalidateQueries({ queryKey: ['project-code-chunks', projectId] }),
@@ -118,21 +182,40 @@ export function DocumentViewer({ disabled = false, projectId }: DocumentViewerPr
       : '3단계: Generate로 Wiki 문서를 생성하세요.'
 
   useEffect(() => {
-    if (!selectedDocumentId && selectedDocumentIdFromList) {
-      setSelectedDocumentId(selectedDocumentIdFromList)
+    if (!missingDocumentMessage && !selectedDocumentId && visibleDocuments[0]) {
+      setSelectedDocumentId(getRealDocumentId(visibleDocuments[0]))
     }
-  }, [selectedDocumentId, selectedDocumentIdFromList])
+  }, [missingDocumentMessage, selectedDocumentId, visibleDocuments])
 
   useEffect(() => {
-    const selectedDocumentExists = documents.some(
-      (document) => document.language === language && getDocumentId(document) === selectedDocumentId,
-    )
-
-    if (selectedDocumentId && !selectedDocumentExists) {
-      const firstVisibleDocument = documents.find((document) => document.language === language)
-      setSelectedDocumentId(firstVisibleDocument ? getDocumentId(firstVisibleDocument) : '')
+    if (visibleDocuments.length === 0) {
+      if (selectedDocumentId) {
+        setSelectedDocumentId('')
+      }
+      return
     }
-  }, [documents, language, selectedDocumentId])
+
+    if (!missingDocumentMessage && selectedDocumentId && !isSelectedIdValid) {
+      setSelectedDocumentId(getRealDocumentId(visibleDocuments[0]))
+    }
+  }, [isSelectedIdValid, missingDocumentMessage, selectedDocumentId, visibleDocuments])
+
+  useEffect(() => {
+    if (!documentQuery.isError || !axios.isAxiosError(documentQuery.error)) {
+      return
+    }
+
+    if (documentQuery.error.response?.status === 404) {
+      setSelectedDocumentId('')
+      setMissingDocumentMessage('문서를 찾을 수 없습니다. 다시 Generate를 실행하세요.')
+    }
+  }, [documentQuery.error, documentQuery.isError])
+
+  useEffect(() => {
+    if (selectedDocumentIdFromList || visibleDocuments.length === 0) {
+      setMissingDocumentMessage('')
+    }
+  }, [selectedDocumentIdFromList, visibleDocuments.length])
 
   return (
     <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -150,6 +233,7 @@ export function DocumentViewer({ disabled = false, projectId }: DocumentViewerPr
                 onChange={(event) => {
                   setLanguage(event.target.value as DocumentLanguage)
                   setSelectedDocumentId('')
+                  setMissingDocumentMessage('')
                 }}
                 value={language}
               >
@@ -192,8 +276,9 @@ export function DocumentViewer({ disabled = false, projectId }: DocumentViewerPr
             {hasCodeChunks ? `${codeChunks.length} ready` : 'missing'}
           </p>
         </div>
-        {actionError ? (
-          <p className="mt-3 text-sm text-red-600">{actionError}</p>
+        {actionError ? <p className="mt-3 text-sm text-red-600">{actionError}</p> : null}
+        {missingDocumentMessage ? (
+          <p className="mt-3 text-sm text-red-600">{missingDocumentMessage}</p>
         ) : null}
       </div>
 
@@ -211,22 +296,29 @@ export function DocumentViewer({ disabled = false, projectId }: DocumentViewerPr
             </p>
           ) : null}
           <div className="space-y-2">
-            {visibleDocuments.map((document) => (
-              <button
-                className={[
-                  'w-full rounded-md px-3 py-2 text-left text-sm transition',
-                  selectedDocumentIdFromList === getDocumentId(document)
-                    ? 'bg-sky-50 font-medium text-sky-800'
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950',
-                ].join(' ')}
-                key={getDocumentId(document)}
-                onClick={() => setSelectedDocumentId(getDocumentId(document))}
-                type="button"
-              >
-                <span className="block">{document.title}</span>
-                <span className="mt-1 block text-xs text-slate-400">{document.document_type}</span>
-              </button>
-            ))}
+            {visibleDocuments.map((document) => {
+              const documentId = getRealDocumentId(document)
+
+              return (
+                <button
+                  className={[
+                    'w-full rounded-md px-3 py-2 text-left text-sm transition',
+                    selectedDocumentIdFromList === documentId
+                      ? 'bg-sky-50 font-medium text-sky-800'
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950',
+                  ].join(' ')}
+                  key={documentId}
+                  onClick={() => {
+                    setSelectedDocumentId(documentId)
+                    setMissingDocumentMessage('')
+                  }}
+                  type="button"
+                >
+                  <span className="block">{document.title}</span>
+                  <span className="mt-1 block text-xs text-slate-400">{document.document_type}</span>
+                </button>
+              )
+            })}
           </div>
         </aside>
 
@@ -242,7 +334,7 @@ export function DocumentViewer({ disabled = false, projectId }: DocumentViewerPr
           {documentQuery.isError ? (
             <p className="text-sm text-red-600">
               {axios.isAxiosError(documentQuery.error) && documentQuery.error.response?.status === 404
-                ? '문서를 찾을 수 없습니다. 문서를 다시 생성해 주세요.'
+                ? '문서를 찾을 수 없습니다. 다시 Generate를 실행하세요.'
                 : 'Failed to load selected document.'}
             </p>
           ) : null}
@@ -252,8 +344,8 @@ export function DocumentViewer({ disabled = false, projectId }: DocumentViewerPr
             </p>
           ) : null}
           {documentQuery.data ? (
-            <div className="max-w-none space-y-4 text-sm leading-7 text-slate-700 [&_code]:rounded [&_code]:bg-slate-100 [&_code]:px-1 [&_code]:py-0.5 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:text-slate-950 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-slate-950 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-slate-950 [&_li]:ml-5 [&_li]:list-disc [&_pre]:overflow-auto [&_pre]:rounded-lg [&_pre]:bg-slate-950 [&_pre]:p-4 [&_pre]:text-slate-100">
-              <ReactMarkdown>{documentQuery.data.content}</ReactMarkdown>
+            <div className="max-w-none space-y-4 text-sm leading-7 text-slate-700 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:text-slate-950 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-slate-950 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-slate-950 [&_li]:ml-5 [&_li]:list-disc">
+              <ReactMarkdown components={markdownComponents}>{documentQuery.data.content}</ReactMarkdown>
             </div>
           ) : null}
         </div>

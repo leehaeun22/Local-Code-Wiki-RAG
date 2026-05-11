@@ -1,3 +1,6 @@
+import logging
+import re
+
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -14,6 +17,9 @@ class DocumentGenerationError(Exception):
     pass
 
 
+logger = logging.getLogger(__name__)
+
+
 INSUFFICIENT_DATA_MESSAGE = (
     "No code chunks found. Run Prepare Docs before document generation."
 )
@@ -23,6 +29,8 @@ DOCUMENT_TITLES: dict[str, str] = {
     "api_documentation": "API Documentation",
     "onboarding_guide": "Onboarding Guide",
 }
+CODE_FENCE = "`" * 3
+PLACEHOLDER_BLOCK_PATTERN = re.compile(r"^[\s\u2580-\u259F\u2800-\u28FF\u2500-\u257F_\-=~|]+$")
 
 
 def generate_documents(db: Session, project_id: str, payload: DocumentGenerateRequest) -> list[Document]:
@@ -116,9 +124,12 @@ def get_document(db: Session, project_id: str, document_id: str) -> Document:
     )
 
     if document is None:
-        raise DocumentGenerationError(
-            f"Document not found for this project. project_id={project_id}, document_id={document_id}",
+        logger.warning(
+            "Document detail lookup failed. project_id=%s document_id=%s",
+            project_id,
+            document_id,
         )
+        raise DocumentGenerationError("Document not found for this project.")
 
     if not document.content.strip():
         document.content = _build_document_fallback_content(
@@ -248,17 +259,26 @@ def _generate_local_markdown_document(
         f"- `{file.file_path}` ({file.language or 'unknown'}, {file.size_bytes} bytes)"
         for file in repository_files[:30]
     ]
-    chunk_lines = [
-        "\n".join(
-            [
-                f"### {chunk.file.file_path}:{chunk.start_line}-{chunk.end_line}",
-                "```",
-                chunk.content[:1200],
-                "```",
-            ],
+    chunk_lines = []
+    for chunk in code_chunks:
+        snippet = _build_code_snippet(chunk.content)
+
+        if not snippet:
+            continue
+
+        chunk_lines.append(
+            "\n".join(
+                [
+                    f"### {chunk.file.file_path}:{chunk.start_line}-{chunk.end_line}",
+                    CODE_FENCE,
+                    snippet,
+                    CODE_FENCE,
+                ],
+            ),
         )
-        for chunk in code_chunks[:8]
-    ]
+
+        if len(chunk_lines) >= 8:
+            break
 
     if language == "ko":
         return "\n\n".join(
@@ -296,16 +316,25 @@ def _build_document_context(
         f"- {file.file_path} ({file.language or 'unknown'}, {file.size_bytes} bytes)"
         for file in repository_files[:120]
     ]
-    chunk_lines = [
-        "\n".join(
-            [
-                f"File: {chunk.file.file_path}",
-                f"Lines: {chunk.start_line}-{chunk.end_line}",
-                f"Content:\n{chunk.content[:2000]}",
-            ],
+    chunk_lines = []
+    for chunk in code_chunks:
+        snippet = _build_code_snippet(chunk.content, max_length=2000)
+
+        if not snippet:
+            continue
+
+        chunk_lines.append(
+            "\n".join(
+                [
+                    f"File: {chunk.file.file_path}",
+                    f"Lines: {chunk.start_line}-{chunk.end_line}",
+                    f"Content:\n{snippet}",
+                ],
+            ),
         )
-        for chunk in code_chunks[:30]
-    ]
+
+        if len(chunk_lines) >= 30:
+            break
 
     return "\n".join(
         [
@@ -315,3 +344,22 @@ def _build_document_context(
             "\n\n---\n\n".join(chunk_lines),
         ],
     )
+
+
+def _build_code_snippet(content: str | None, max_length: int = 1200) -> str:
+    normalized = (content or "").replace("\r\n", "\n").strip()
+
+    if not normalized:
+        return ""
+
+    if PLACEHOLDER_BLOCK_PATTERN.fullmatch(normalized):
+        return ""
+
+    visible_text = re.sub(r"\s+", "", normalized)
+    if not visible_text:
+        return ""
+
+    if PLACEHOLDER_BLOCK_PATTERN.fullmatch(visible_text):
+        return ""
+
+    return normalized[:max_length].rstrip()
