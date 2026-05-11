@@ -1,4 +1,5 @@
 import { type FormEvent, useState } from 'react'
+import axios from 'axios'
 import { useMutation } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 
@@ -14,6 +15,37 @@ const initialForm: ProjectCreateRequest = {
   description: '',
   default_language: 'ko',
   llm_mode: 'cloud',
+}
+
+function getErrorMessage(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    const responseDetail = error.response?.data?.detail
+    const responseMessage = error.response?.data?.message
+
+    if (typeof responseDetail === 'string' && responseDetail.trim()) {
+      return responseDetail
+    }
+
+    if (
+      responseDetail &&
+      typeof responseDetail === 'object' &&
+      'message' in responseDetail &&
+      typeof responseDetail.message === 'string' &&
+      responseDetail.message.trim()
+    ) {
+      return responseDetail.message
+    }
+
+    if (typeof responseMessage === 'string' && responseMessage.trim()) {
+      return responseMessage
+    }
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+
+  return 'Failed to create project.'
 }
 
 function validateForm(form: ProjectCreateRequest) {
@@ -171,9 +203,7 @@ export function ProjectCreatePage() {
           {createProjectMutation.isPending ? 'Creating...' : 'Create project'}
         </button>
         {createProjectMutation.isError ? (
-          <p className="text-sm text-red-600">
-            Failed to create project. Check that the backend API is running.
-          </p>
+          <p className="text-sm text-red-600">{getErrorMessage(createProjectMutation.error)}</p>
         ) : null}
       </form>
     </section>

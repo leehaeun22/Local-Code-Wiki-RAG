@@ -1,6 +1,9 @@
 import logging
+from pathlib import Path
+import tempfile
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import Session
@@ -11,6 +14,13 @@ import app.models  # noqa: F401
 
 
 logger = logging.getLogger(__name__)
+
+
+def _build_sqlite_fallback_url() -> URL:
+    storage_dir = Path(tempfile.gettempdir()) / "local-code-wiki-rag"
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    fallback_path = (storage_dir / "local-dev.db").resolve()
+    return URL.create("sqlite", database=str(fallback_path))
 
 
 def _build_engine():
@@ -26,7 +36,7 @@ def _build_engine():
             connection.execute(text("SELECT 1"))
         return engine
     except OperationalError:
-        fallback_url = "sqlite:///./local.db"
+        fallback_url = _build_sqlite_fallback_url()
         logger.warning("Falling back to local SQLite database at %s", fallback_url)
         return create_engine(
             fallback_url,
