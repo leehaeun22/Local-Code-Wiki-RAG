@@ -7,6 +7,7 @@ from app.routers.project_router import router as project_router
 from app.routers.webhook_router import router as webhook_router
 
 
+
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name)
 
